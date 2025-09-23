@@ -1,0 +1,15 @@
+/to-do
+*.txt
+.vscode
+/obj
+.makefile
+/bin
+/.claude
+.out
+/gfx/
+*.log
+*.out
+src/gfx/*.c
+src/gfx/*.h
+makefile
+/planning/

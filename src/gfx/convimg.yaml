@@ -1,0 +1,72 @@
+palettes:
+  - name: global_palette
+    fixed-entries:
+      - color: {index: 0, r: 0, g: 0, b: 0}
+      - color: {index: 1, r: 255, g: 0, b: 0}
+
+      # elixir color
+      - color: {index: 202 ,r: 226, g: 142, b: 238}
+
+      # transparent color
+      - color: {index: 170, r: 255, g: 0, b: 255}
+
+      # yellow 
+      - color: {index: 171, r: 255, g: 255, b: 0}
+      
+      # green
+      - color: {index: 158, r: 158, g: 181, b: 86}
+
+      #white
+      - color: {index: 255, r: 255, g: 255, b: 255}
+
+      # tower red for health bars
+      - color: {index: 150,r: 250,g: 100, b: 100}
+
+      # bar background
+      - color: {index: 136, r: 80, g: 90, b: 140}
+
+      # tower blue for health bars
+      - color: {index: 151,r: 105,g: 170, b: 240}
+      
+      # main menu 
+      # unselected tab color
+      - color: {index: 83, r: 70, g: 80, b: 100}
+      # selected tab color
+      - color: {index: 116, r: 80, g: 120, b: 150}
+
+      # menu grids
+      # lighter
+      - color: {index: 89, r: 19, g: 96, b: 154}
+      # darker
+      - color: {index: 80, r: 19, g: 83, b: 138}
+      # line
+      - color: {index: 68, r: 11, g: 67, b: 126}
+
+    images: automatic
+
+converts:
+  - name: sprites
+    palette: global_palette
+    transparent-color-index: 0
+    images:
+      # chests
+      - chests/*
+      - map/towers/*
+      - map/tiles/*
+      - ui/*
+      - cards/*
+      - cards/troops/giant/*
+      - cards/troops/balloon/*
+      - cards/troops/knight/*
+      - cards/troops/miner/*
+      - cards/troops/musketeer/*
+      - cards/buildings/elixir_collector/*
+      - cards/projectiles/*
+      
+outputs:
+  - type: c
+    include-file: gfx.h
+    palettes:
+      - global_palette
+    converts:
+      - sprites
