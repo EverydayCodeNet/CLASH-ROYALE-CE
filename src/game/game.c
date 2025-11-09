@@ -430,7 +430,9 @@ void draw_elixir_counter(player_t *player, card_t *selected_card) {
     const int MAX_ELIXIR = 10;
     // there is a double black line on the top. just extend the elixir rectangle
     gfx_SetColor(55);
-    gfx_FillRectangle(0,60,11,180);
+    gfx_FillRectangle(0,60,10,180);
+    
+    // CHANGE ORDERING to avoid double call of SetColor(0)
     gfx_SetColor(202);
     // get rid of these magic numbers
     gfx_FillRectangle(0,60,10, (int) (player->elixir * 18));
@@ -448,7 +450,7 @@ void draw_elixir_counter(player_t *player, card_t *selected_card) {
         gfx_Rectangle(0,60,10,18 * selected_card->elixir);
     }
     
-    // CHANGE ORDERING to avoid double call of SetColor(0)
+    
 }
 
 void draw_card_carousel(player_t *player) {
@@ -464,7 +466,7 @@ void draw_card_carousel(player_t *player) {
     const int CARD_HEIGHT = 40;
 
     gfx_SetColor(56);
-    gfx_FillRectangle(10,60,60,180);
+    gfx_FillRectangle(10,60,70,180);
 
     int y = 0;
     const int NUM_AVAILABLE = 4;
@@ -490,7 +492,7 @@ void draw_card_carousel(player_t *player) {
     draw_elixir_counter(player, selected_card);
 
     gfx_SetColor(0);
-    gfx_Rectangle(10,60,60,180);
+    gfx_Rectangle(0,60,70,180);
 }
 
 void draw_player_modal(player_t *player, tower_t *enemy_towers) {
@@ -499,20 +501,29 @@ void draw_player_modal(player_t *player, tower_t *enemy_towers) {
 }
 
 void update_elixir(game_t *game) {
-    double elixir_rate = 0.5;
-    const double MAX_ELIXIR = 10;
+    const double MAX_ELIXIR = 10.0;
 
     player_t *player = game->player;
     player_t *opponent = game->opponent;
 
-    // Double elixir at 30s left?
-    
-    if ((player->elixir + elixir_rate) <= MAX_ELIXIR) {
-        player->elixir += elixir_rate;
+    // Double elixir in last 60 seconds
+    bool double_elixir = (game->time_remaining <= 60);
+    double elixir_increment = double_elixir ? 0.1 : 0.05;
+
+    // Update player elixir every tick
+    if (player->elixir < MAX_ELIXIR) {
+        player->elixir += elixir_increment;
+        if (player->elixir > MAX_ELIXIR) {
+            player->elixir = MAX_ELIXIR;
+        }
     }
 
-    if ((opponent->elixir + elixir_rate) <= MAX_ELIXIR) {
-        opponent->elixir += elixir_rate;
+    // Update opponent elixir every tick
+    if (opponent->elixir < MAX_ELIXIR) {
+        opponent->elixir += elixir_increment;
+        if (opponent->elixir > MAX_ELIXIR) {
+            opponent->elixir = MAX_ELIXIR;
+        }
     }
 }
 
@@ -1326,13 +1337,10 @@ void free_troop_list(troop_t *head) {
     troop_t *current = head;
     while (current != NULL) {
         troop_t *next = current->next;
-        
-        // Free sprite arrays if allocated
-        if (current->forward_movement) CR_FREE(current->forward_movement);
-        if (current->backward_movement) CR_FREE(current->backward_movement);
-        if (current->attack_cycle) CR_FREE(current->attack_cycle);
-        if (current->attack_cycle_rev) CR_FREE(current->attack_cycle_rev);
-        
+
+        // DON'T free sprite arrays - they're shared references from card templates
+        // Only freed once via free_card_sprites() in free_data()
+
         CR_FREE(current);
         current = next;
     }
@@ -1404,6 +1412,10 @@ void free_linked_list(void *head, void (*free_node)(void*)) {
 
     // Free deck structure (but not the cards themselves - they're shared references)
     if (player->deck != NULL) {
+        // CRITICAL: Free card_indices array before freeing deck
+        if (player->deck->card_indices != NULL) {
+            CR_FREE(player->deck->card_indices);
+        }
         CR_FREE(player->deck);
     }
 
@@ -1484,58 +1496,79 @@ void run_game(game_t *game) {
 
     player_t *player = game->player;
     player_t *opponent = game->opponent;
-    
+
     // Toggle draw loading screen in settings
     // drawLoadingScreen();
     // while (!(kb_Data[6] & kb_Enter));
     gfx_SetDrawBuffer();
-    draw_map(game);
+
+    // SIMPLIFIED: Just draw basic background
+    gfx_FillScreen(80);
 
     bool view_opponent = false;
     // initTimer();
     while (exit == false) {
         kb_Scan();
 
-        handle_players(game);
+        // ADDED BACK: Card selection handling
+        handle_keys(player);
+
+        // ADDED BACK: Timer update
         update_timer(game);
 
+        // COMMENTED OUT: Complex game logic - rebuild incrementally
         update_elixir(game);
-        update_towers(game);
-        update_troops(game);
-        update_buildings(game);
-        update_spells(game);
-        update_projectiles(game);
-        // projectiles always have to hit their target
-        
+        // update_towers(game);
+        // update_troops(game);
+        // update_buildings(game);
+        // update_spells(game);
+        // update_projectiles(game);
+
+        // SIMPLIFIED: Just draw background and deck
+        gfx_FillScreen(80);
+
+        // COMMENTED OUT: Complex rendering - rebuild incrementally
+        // draw_tiles();
         draw_map(game);
-        draw_troops(game);
-        draw_buildings(game);
-        draw_spells(game);
-        draw_projectiles(game);
+        // draw_troops(game);
+        // draw_buildings(game);
+        // draw_spells(game);
+        // draw_projectiles(game);
 
-        if (kb_Data[4] & kb_Stat) debug = !debug; 
+        // COMMENTED OUT: Debug toggle
+        // if (kb_Data[4] & kb_Stat) debug = !debug;
+        // if (debug == true) {
+        //     if (kb_Data[1] & kb_Mode) view_opponent = !view_opponent;
+        // }
 
-        if (debug == true) {
-            if (kb_Data[1] & kb_Mode) view_opponent = !view_opponent;
-        }
-        
+        // SIMPLIFIED: Just draw player's deck/modal
         if (view_opponent == false) {
-            draw_player_modal(player, opponent->towers);
-        } else {
-            draw_player_modal(opponent, player->towers);
+            draw_card_carousel(player);
+            // COMMENTED OUT: Cursor and bounds rendering
+            // draw_player_modal(player, opponent->towers);
         }
+        // COMMENTED OUT: Opponent view
+        // else {
+        //     draw_player_modal(opponent, player->towers);
+        // }
 
+        // ADDED BACK: Timer rendering
         draw_timer(game);
 
         gfx_BlitBuffer();
-    
-        // Maybe the options to pause/resume game instead of hard quitting
-            // kb_Clear should bring up an are you sure you want to end battle?
-            // and pause the game
 
-        // Can probably move remaining time check into check win
-        if (kb_Data[6] & kb_Clear || check_win(game) == true) exit = true;
-        // if  ((getRemainingTime() <= 0) || (kb_Data[6] == kb_Clear) || checkWin(player, opponent, towers, enemyTowers)) exit = true; 
+        // Exit on Clear key or timer run-out
+        if (kb_Data[6] & kb_Clear) {
+            exit = true;
+        }
+
+        // Check if timer has run out - go to game over screen
+        if (get_remaining_time(game) == 0) {
+            exit = true;
+        }
+
+        // COMMENTED OUT: Win condition check
+        // if (kb_Data[6] & kb_Clear || check_win(game) == true) exit = true;
     } while (!(exit));
 
     // pass in game attribute to get the amount of trophies

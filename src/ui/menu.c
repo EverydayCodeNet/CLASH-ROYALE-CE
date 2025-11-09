@@ -24,20 +24,27 @@ const char *appvarName = "slota";
 
 // save_data() and load_data() functions are now defined in data.c
 
-void init_button(button_t *button, bool tab, int x, int y, int width, int height, void *function, void *args) {
+// Forward declarations
+point_t find_center(int x, int y, int icon_x, int icon_y, int width, int height, int icon_width, int icon_height);
+screen_t *get_screen_by_name(screen_t *screen, char *screen_name);
+
+// Combined button setup function
+void setup_button(button_t *button, bool tab, int x, int y, int width, int height,
+                  void *function, void *args, int color, int active_color,
+                  gfx_sprite_t *sprite, gfx_sprite_t *icon,
+                  int border_weight, int border_color, int border_active_color,
+                  bool transparent, bool center_x, bool center_y, int x_offset, int y_offset) {
+    // Basic properties
     button->x = x;
     button->y = y;
     button->width = width;
     button->height = height;
-    button->color = 100;
+    button->color = color;
+    button->active_color = active_color;
     button->tab = tab;
+    button->active = tab;
 
-    if (tab == true) {
-        button->active = true;
-    } else {
-        button->active = false;
-    }
-   
+    // Function and event setup
     if (function != NULL) {
         button->event = ACTION;
         button->function = function;
@@ -48,25 +55,48 @@ void init_button(button_t *button, bool tab, int x, int y, int width, int height
         button->args = NULL;
     }
 
-    // Initialize border
-    button->border.weight = 0;
-    button->border.color = 0;
-    button->active_color = 0;
+    // Border setup
+    button->border.weight = border_weight;
+    button->border.color = border_color;
+    button->border.active_color = border_active_color;
+
+    // Sprite setup
+    if (sprite != NULL) button->sprite = sprite;
+
+    // Icon setup
+    if (icon != NULL) {
+        button->icon.sprite = icon;
+        button->has_icon = true;
+        button->icon.transparent = transparent;
+
+        point_t center = find_center(x, y, x, y, width, height, icon->width, icon->height);
+        button->icon.x = center_x ? center.x : x + x_offset;
+        button->icon.y = center_y ? center.y : y + y_offset;
+    } else {
+        button->has_icon = false;
+    }
 }
 
-// Function for changing button color attributes
+// Simplified button init for basic cases
+void init_button(button_t *button, bool tab, int x, int y, int width, int height, void *function, void *args) {
+    setup_button(button, tab, x, y, width, height, function, args, 100, 0, NULL, NULL, 0, 0, 0, false, false, false, 0, 0);
+}
+
+// Legacy functions for compatibility
 void customize_button(button_t *button, int color, int active_color, gfx_sprite_t *sprite, gfx_sprite_t *icon) {
     button->color = color;
     button->active_color = active_color;
     if (sprite != NULL) button->sprite = sprite;
-    if (icon != NULL) button->icon.sprite = icon;
-    if (icon != NULL) button->has_icon = true;
+    if (icon != NULL) {
+        button->icon.sprite = icon;
+        button->has_icon = true;
+    }
 }
 
 void customize_border(button_t *button, int weight, int color, int active_color) {
     button->border.weight = weight;
     button->border.color = color;
-    button->border.active_color = active_color; 
+    button->border.active_color = active_color;
 }
 
 void set_selection_delay(screen_t *screen, int delay) {
@@ -75,7 +105,6 @@ void set_selection_delay(screen_t *screen, int delay) {
 
 bool can_unlock(chest_t *chests) {
     const int NUM_CHESTS = 4;
-
     for (int i = 0; i < NUM_CHESTS; i++) {
         chest_t *chest = &chests[i];
         if (chest->status == UNLOCKING) return false;
@@ -87,12 +116,42 @@ void unlock_chest(chest_t *chest) {
     chest->status = UNLOCKING;
 }
 
-void init_screen() {
-
+void continue_chest_opening(void) {
+    // Implementation for chest opening continuation
 }
 
-void continue_chest_opening(void) {
+void use_card_from_collection(void *args) {
+    (void)args; // Suppress unused parameter warning
+    // Get selected card from collection and add to deck
+    // Implementation to be added
+}
 
+void view_card_upgrades(void *args) {
+    (void)args; // Suppress unused parameter warning
+    // Show upgrade options for selected card
+    // Implementation to be added
+}
+
+void switch_to_collection(void *args) {
+    screen_t *current_screen = (screen_t *)args;
+    screen_t *collection_screen = get_screen_by_name(current_screen, "collection");
+
+    if (collection_screen != NULL) {
+        current_screen->active = false;
+        collection_screen->active = true;
+        collection_screen->selection_index = 1; // Start on card grid
+    }
+}
+
+void switch_to_deck(void *args) {
+    screen_t *current_screen = (screen_t *)args;
+    screen_t *deck_screen = get_screen_by_name(current_screen, "deck");
+
+    if (deck_screen != NULL) {
+        current_screen->active = false;
+        deck_screen->active = true;
+        deck_screen->selection_index = 2; // Start on card grid
+    }
 }
 
 screen_t *get_screen_by_name(screen_t *screen, char *screen_name) {
@@ -100,29 +159,20 @@ screen_t *get_screen_by_name(screen_t *screen, char *screen_name) {
     while (temp != NULL && strcmp(temp->name, screen_name) != 0) {
         temp = temp->next;
     }
-
     return temp;
 }
 
 void open_chest(screen_t *screen, chest_t *chest) {
-    int num_primary_selections = 1;
     screen->active = false;
-
     screen_t *chest_opening = get_screen_by_name(screen, "chest_opening");
     chest_opening->active = true;
-
-    // screen->next = init_screen(num_primary_selections, 150, data);
-    // screen->next = 
-
     chest->status = UNLOCKING;
     chest->unlock_step = 0;
 }
 
-// This function is called via key press (enter), validate that the chest slot is empty or available to open
 void handle_chests(screen_t *screen) {
     chest_t *chests = screen->data->chests;
     if (chests == NULL) return;
-    // Get the 
 
     int primary_selection_index = screen->selection_index;
     int index = screen->primary_selections[primary_selection_index].secondary_selection_index;
@@ -130,123 +180,96 @@ void handle_chests(screen_t *screen) {
     chest_status_t status = chest->status;
     if (status == LOCKED) {
         if (can_unlock(chests) == true) {
-            // Replace this function with the one expression?
             unlock_chest(chest);
         }
     } else if (status == OPEN) {
         open_chest(screen, chest);
     }
-        
 }
 
-// Return the left and right coords necessary to draw rectangles centered on each other
 point_t find_center(int x, int y, int icon_x, int icon_y, int width, int height, int icon_width, int icon_height) {
+    (void)icon_x; (void)icon_y; // Suppress unused parameter warnings
     point_t point;
     point.x = x + (width - icon_width) / 2;
     point.y = y + (height - icon_height) / 2;
-
     return point;
 }
 
-void customize_icon(button_t *button, bool transparent, bool center_x, bool center_y, int x_offset, int y_offset) {
-    button->icon.transparent = transparent;
-    point_t center = find_center(button->x, button->y, button->x, button->y, button->width, button->height, button->icon.sprite->width, button->icon.sprite->height);
-
-    if (center_x == true) {
-        button->icon.x = center.x;
-    } else {
-        button->icon.x = button->x + x_offset;
-    }
-
-    if (center_y == true) {
-        button->icon.y = center.y;
-    } else {
-        button->icon.y = button->y + y_offset;
-    }
-
-    if (transparent == true) button->icon.transparent = true;
-
+// Helper functions for common button patterns
+void setup_tab_button(button_t *button, int x, int y, int width, int height, gfx_sprite_t *icon, bool active) {
+    setup_button(button, true, x, y, width, height, NULL, NULL, 83, active ? 116 : 83,
+                 NULL, icon, 2, 255, 255, true, true, true, 0, 0);
+    button->active = active;
 }
 
-// Set button x, y using for loops
+void setup_chest_slot(button_t *button, int x, int y, int width, int height, void *function, void *args, gfx_sprite_t *icon) {
+    setup_button(button, false, x, y, width, height, function, args, 100, 100,
+                 NULL, icon, 1, 255, 171, true, true, false, 0, 10);
+}
+
+void setup_card_button(button_t *button, int x, int y, int width, int height, card_t *card) {
+    int active_color = 100;
+    if (card != NULL) {
+        switch(card->rarity) {
+            case COMMON: active_color = 151; break;
+            case RARE: active_color = 150; break;
+            case EPIC: active_color = 202; break;
+            case LEGENDARY: active_color = 171; break;
+        }
+    }
+    gfx_sprite_t *sprite = card ? card->sprite : NULL;
+    setup_button(button, false, x, y, width, height, NULL, NULL, 100, active_color,
+                 NULL, sprite, 1, 255, active_color, true, true, true, 0, 0);
+}
+
+// Helper function for common screen initialization
+screen_t *create_screen(const char *name, int num_primary_selections, data_t *data) {
+    screen_t *screen = CR_MALLOC(sizeof(screen_t));
+    screen->name = CR_MALLOC(sizeof(char) * (strlen(name) + 1));
+    strcpy(screen->name, name);
+    screen->num_primary_selections = num_primary_selections;
+    screen->primary_selections = CR_MALLOC(sizeof(primary_selection_t) * num_primary_selections);
+    screen->selection_index = 0;
+    screen->active = false;
+    screen->data = data;
+    screen->next = NULL;
+    set_selection_delay(screen, 150);
+    return screen;
+}
+
 void init_chest_slots(screen_t *screen, button_t *slots) {
-    // maybe size down these slots to accomodate for chests
     const int SLOT_HEIGHT = 45;
     const int SLOT_WIDTH = 60;
     const int NUM_CHEST_SLOTS = 4;
-    int y;
 
-    gfx_SetColor(255);
-    int NUM_CHESTS = 0;
-    int rarity = 0;
-    /*int remainingChestSlots = getAvailableChestSlots(chests);
-    if (remainingChestSlots == -1) NUM_CHESTS = 4;
-    else NUM_CHESTS = 4 - remainingChestSlots;*/
-
-    gfx_sprite_t *chest_sprites[3] = {silver_chest, gold_chest, magical_chest};
-    // for (int i = 0; i < NUM_CHEST_SLOTS; i++) {
-    //     if (slots[i] != NULL) {
-    //         NUM_CHESTS++;
-    //         } else {
-    //             // what about in the case where the chests are opened?
-    //         break; // Exit the loop when a NULL pointer is encountered
-    //         }
-    //     }
-    // chest slots
     for (int i = 0; i < NUM_CHEST_SLOTS; i++) {
-        // make it green if the chest is unlocked with an increasing aura effect
-        // make it yellow on hover
-        y = 15 + (i * (10 + SLOT_HEIGHT));
-        init_button(&slots[i], false, 75 , y, SLOT_WIDTH, SLOT_HEIGHT, handle_chests, screen); 
-        // button_t *button, int weight, int color, int active_color
-        customize_border(&slots[i], 1, 255, 171);
+        int y = 15 + (i * (10 + SLOT_HEIGHT));
         gfx_sprite_t *icon = NULL;
-        // icon, center_x, center_y,  
-        // if (slots[i]->status != EMPTY) {
-        //     icon = slots[i].sprite;
-        // }
-        chest_t *chest;
+
         if (screen->data->chests != NULL) {
-            chest = &screen->data->chests[i];
+            chest_t *chest = &screen->data->chests[i];
             if (chest->status != EMPTY) icon = chest->sprite;
-        } 
+        }
 
-        // button_t *button, int color, int active_color, gfx_sprite_t *sprite, gfx_sprite_t *icon
-        // customize_button(&slots[i], 100, 100, NULL, icon);
-        // customize_icon(&slots[i], true, true, false, 0, 10);
-
-        // customize border
+        setup_chest_slot(&slots[i], 75, y, SLOT_WIDTH, SLOT_HEIGHT, handle_chests, screen, icon);
     }
-
-    // loop over array of chests
 }
 
 screen_t *init_deck_screen(data_t *data) {
-    screen_t *deck = CR_MALLOC(sizeof(screen_t));
-    
-    // Set screen name
-    char *deck_name = "deck";
-    deck->name = CR_MALLOC(sizeof(char) * strlen(deck_name) + 1);
-    strcpy(deck->name, deck_name);
-
-    const int NUM_PRIMARY_SELECTIONS = 4;  // One for deck tab, one for inactive battle tab, one for grid, one for elixir bar
+    const int NUM_PRIMARY_SELECTIONS = 4;
     const int NUM_CARDS = 8;
-    const int TOTAL_BUTTONS = NUM_CARDS + 5;  // Cards + 2 tabs + grid area + elixir bar + inactive battle tab
+    const int TOTAL_BUTTONS = NUM_CARDS + 5;
 
-    // Initialize all buttons
+    screen_t *deck = create_screen("deck", NUM_PRIMARY_SELECTIONS, data);
     button_t *buttons = CR_MALLOC(sizeof(button_t) * TOTAL_BUTTONS);
     
-    // Initialize deck tab (top tab)
-    init_button(&buttons[0], true, 0, 0, 60, 120, NULL, NULL);
-    customize_button(&buttons[0], 83, 116, NULL, deck_icon); 
-    customize_border(&buttons[0], 2, 255, 255);
-    customize_icon(&buttons[0], true, true, true, 0, 0);
+    // Initialize deck tab (top tab) - clickable to switch to collection
+    setup_tab_button(&buttons[0], 0, 0, 60, 120, deck_icon, true);
+    buttons[0].function = switch_to_collection;
+    buttons[0].args = deck;
 
     // Initialize battle tab (bottom tab) as an inactive, non-selectable button
-    init_button(&buttons[1], false, 0, 120, 60, 120, NULL, NULL);
-    customize_button(&buttons[1], 83, 83, NULL, battle_icon); 
-    customize_border(&buttons[1], 2, 255, 255);
-    customize_icon(&buttons[1], true, true, true, 0, 0);
+    setup_tab_button(&buttons[1], 0, 120, 60, 120, battle_icon, false);
 
     // Initialize card grid area
     init_button(&buttons[2], false, 175, 15, 150, 200, NULL, NULL);
@@ -260,61 +283,26 @@ screen_t *init_deck_screen(data_t *data) {
     // Initialize card buttons
     button_t *card_buttons = CR_MALLOC(sizeof(button_t) * NUM_CARDS);
     for (int i = 0; i < NUM_CARDS; i++) {
-        int x = 225;
-        int y = 15 + i * 40;
-        
-        if (i > 3) {
-            x = 175;
-            y = 15 + (i - 4) * 40;
-        }
-        
-        init_button(&card_buttons[i], false, x, y, 40, 30, NULL, NULL);
-        
-        // Set button colors based on card rarity
-        int color = 100;
-        int active_color = 100;
-        // MEMORY OPTIMIZATION: data->deck now points to available_cards array
-        if (data && data->deck) {
-            switch(data->deck[i].rarity) {
-                case COMMON:
-                    active_color = 151;
-                    break;
-                case RARE:
-                    active_color = 150;
-                    break;
-                case EPIC:
-                    active_color = 202;
-                    break;
-                case LEGENDARY:
-                    active_color = 171;
-                    break;
-            }
-        }
-        customize_button(&card_buttons[i], color, active_color, NULL, data->deck[i].sprite);
-        customize_border(&card_buttons[i], 1, 255, active_color);
-        customize_icon(&card_buttons[i], true, true, true, 0, 0);
+        int x = (i > 3) ? 175 : 225;
+        int y = 15 + ((i > 3) ? (i - 4) : i) * 40;
+
+        card_t *card = (data && data->deck) ? &data->deck[i] : NULL;
+        setup_card_button(&card_buttons[i], x, y, 40, 30, card);
     }
 
     // Set up primary selections
-    deck->num_primary_selections = NUM_PRIMARY_SELECTIONS;
-    deck->primary_selections = CR_MALLOC(sizeof(primary_selection_t) * NUM_PRIMARY_SELECTIONS);
-    
-    // Assign tabs button
     deck->primary_selections[0].button = &buttons[0];
     deck->primary_selections[0].num_secondary_selections = 0;
     deck->primary_selections[0].secondary_selection_index = -1;
 
-    // Assign inactive battle tab
-    deck->primary_selections[1].button = &buttons[1]; 
+    deck->primary_selections[1].button = &buttons[1];
     deck->primary_selections[1].num_secondary_selections = 0;
     deck->primary_selections[1].secondary_selection_index = -1;
 
-    // Assign card grid
     deck->primary_selections[2].button = &buttons[2];
     deck->primary_selections[2].num_secondary_selections = NUM_CARDS;
     deck->primary_selections[2].secondary_selection_index = -1;
 
-    // Assign elixir bar
     deck->primary_selections[3].button = &buttons[3];
     deck->primary_selections[3].num_secondary_selections = 0;
     deck->primary_selections[3].secondary_selection_index = -1;
@@ -323,46 +311,145 @@ screen_t *init_deck_screen(data_t *data) {
     secondary_selection_t *card_selections = CR_MALLOC(sizeof(secondary_selection_t));
     card_selections->buttons = card_buttons;
     deck->primary_selections[2].secondary_selections = card_selections;
-    
-    // Initialize other deck screen properties
-    deck->selection_index = 0;
-    deck->active = false;
-    deck->data = data;
-    set_selection_delay(deck, 150);
-    deck->next = NULL;
 
     return deck;
 }
 
+screen_t *init_collection_screen(data_t *data) {
+    const int NUM_PRIMARY_SELECTIONS = 4;
+    const int NUM_CARDS = 8;
+    const int NUM_COLLECTION_CARDS = 3;
+
+    screen_t *collection = create_screen("collection", NUM_PRIMARY_SELECTIONS, data);
+    button_t *buttons = CR_MALLOC(sizeof(button_t) * (NUM_CARDS + NUM_COLLECTION_CARDS + 3));
+
+    // Initialize deck header button (clickable to switch back to deck)
+    setup_button(&buttons[0], false, 20, 10, 60, 25, switch_to_deck, collection, 83, 116, NULL, NULL, 2, 255, 255, false, false, false, 0, 0);
+
+    // Initialize main card grid area (8 cards like deck screen)
+    button_t *main_cards = CR_MALLOC(sizeof(button_t) * NUM_CARDS);
+    for (int i = 0; i < NUM_CARDS; i++) {
+        int x = (i > 3) ? 175 : 225;
+        int y = 45 + ((i > 3) ? (i - 4) : i) * 40;
+
+        card_t *card = (data && data->available_cards) ? &data->available_cards[i] : NULL;
+        setup_card_button(&main_cards[i], x, y, 40, 30, card);
+    }
+
+    // Initialize selected card info area
+    setup_button(&buttons[1], false, 20, 170, 60, 30, NULL, NULL, 100, 100, NULL, NULL, 1, 255, 255, false, false, false, 0, 0);
+
+    // Initialize USE button
+    setup_button(&buttons[2], false, 100, 170, 40, 20, use_card_from_collection, collection, 83, 116, NULL, NULL, 2, 255, 255, false, false, false, 0, 0);
+
+    // Initialize collection area (3 cards at bottom)
+    button_t *collection_cards = CR_MALLOC(sizeof(button_t) * NUM_COLLECTION_CARDS);
+    for (int i = 0; i < NUM_COLLECTION_CARDS; i++) {
+        int x = 20 + i * 50;
+        int y = 210;
+
+        setup_button(&collection_cards[i], false, x, y, 40, 30, NULL, NULL, 100, 120, NULL, NULL, 1, 255, 255, false, false, false, 0, 0);
+    }
+
+    // Set up primary selections
+    collection->primary_selections[0].button = &buttons[0];  // Deck header
+    collection->primary_selections[0].num_secondary_selections = 0;
+    collection->primary_selections[0].secondary_selection_index = -1;
+
+    collection->primary_selections[1].button = &buttons[1];  // Card grid area
+    collection->primary_selections[1].num_secondary_selections = NUM_CARDS;
+    collection->primary_selections[1].secondary_selection_index = -1;
+
+    collection->primary_selections[2].button = &buttons[2];  // USE button
+    collection->primary_selections[2].num_secondary_selections = 0;
+    collection->primary_selections[2].secondary_selection_index = -1;
+
+    collection->primary_selections[3].button = &buttons[1];  // Collection area
+    collection->primary_selections[3].num_secondary_selections = NUM_COLLECTION_CARDS;
+    collection->primary_selections[3].secondary_selection_index = -1;
+
+    // Set up secondary selections for main card grid
+    secondary_selection_t *main_card_selections = CR_MALLOC(sizeof(secondary_selection_t));
+    main_card_selections->buttons = main_cards;
+    collection->primary_selections[1].secondary_selections = main_card_selections;
+
+    // Set up secondary selections for collection area
+    secondary_selection_t *collection_selections = CR_MALLOC(sizeof(secondary_selection_t));
+    collection_selections->buttons = collection_cards;
+    collection->primary_selections[3].secondary_selections = collection_selections;
+
+    return collection;
+}
+
+void continue_from_results(void *args) {
+    screen_t *screen = (screen_t *)args;
+    // Return to main menu from battle results
+    screen->active = false;
+    screen_t *main_screen = screen;
+    while (main_screen != NULL && strcmp(main_screen->name, "main") != 0) {
+        main_screen = main_screen->next;
+    }
+    if (main_screen != NULL) {
+        main_screen->active = true;
+        main_screen->selection_index = 0;
+    }
+}
+
+screen_t *init_battle_results_screen(data_t *data) {
+    const int NUM_PRIMARY_SELECTIONS = 2;
+    const int NUM_REWARD_CARDS = 6;
+
+    screen_t *results = create_screen("battle_results", NUM_PRIMARY_SELECTIONS, data);
+    button_t *buttons = CR_MALLOC(sizeof(button_t) * (NUM_REWARD_CARDS + 2));
+
+    // Initialize king/character icon area
+    setup_button(&buttons[0], false, 20, 50, 80, 100, NULL, NULL, 100, 120, NULL, NULL, 2, 255, 255, false, false, false, 0, 0);
+
+    // Initialize continue button
+    setup_button(&buttons[1], false, 120, 200, 80, 30, continue_from_results, results, 83, 116, NULL, NULL, 2, 255, 255, false, false, false, 0, 0);
+
+    // Initialize reward cards (2x3 grid)
+    button_t *reward_cards = CR_MALLOC(sizeof(button_t) * NUM_REWARD_CARDS);
+    for (int i = 0; i < NUM_REWARD_CARDS; i++) {
+        int col = i % 2;  // 2 columns
+        int row = i / 2;  // 3 rows
+        int x = 130 + col * 70;
+        int y = 30 + row * 60;
+
+        setup_button(&reward_cards[i], false, x, y, 60, 50, NULL, NULL, 100, 171, NULL, NULL, 2, 255, 171, false, false, false, 0, 0);
+    }
+
+    // Set up primary selections
+    results->primary_selections[0].button = &buttons[0];  // King icon area
+    results->primary_selections[0].num_secondary_selections = NUM_REWARD_CARDS;
+    results->primary_selections[0].secondary_selection_index = -1;
+
+    results->primary_selections[1].button = &buttons[1];  // Continue button
+    results->primary_selections[1].num_secondary_selections = 0;
+    results->primary_selections[1].secondary_selection_index = -1;
+
+    // Set up secondary selections for reward cards
+    secondary_selection_t *reward_selections = CR_MALLOC(sizeof(secondary_selection_t));
+    reward_selections->buttons = reward_cards;
+    results->primary_selections[0].secondary_selections = reward_selections;
+
+    return results;
+}
+
 screen_t *init_screens(void) {
-    // Main menu
-    unsigned int num_selections = 4; // Active tab + 3 other selections
-    unsigned int num_buttons = 5;    
-    unsigned int num_secondary_selections = 4;
-    char *name;
+    const unsigned int num_selections = 4;
+    const unsigned int num_buttons = 5;
+    const unsigned int num_secondary_selections = 4;
 
-    // Allocate memory
-    screen_t *main = CR_MALLOC(sizeof(screen_t));
-    primary_selection_t *primary_selections = CR_MALLOC(sizeof(primary_selection_t) * num_selections);
+    screen_t *main = create_screen("main", num_selections, &data);
+    main->active = true;  // Main screen starts active
     button_t *buttons = CR_MALLOC(sizeof(button_t) * num_buttons);
-
-    name = "main";
-    main->name = CR_MALLOC(sizeof(char) * strlen(name) + 1);
-    strcpy(main->name, name);
-    main->num_primary_selections = num_selections;
     
     // Initialize battle tab (active, bottom)
-    init_button(&buttons[0], true, 0, 120, 60, 120, NULL, NULL);
-    customize_button(&buttons[0], 83, 116, NULL, battle_icon);
-    customize_border(&buttons[0], 2, 255, 255);
-    customize_icon(&buttons[0], true, true, true, 0, 0);
+    setup_tab_button(&buttons[0], 0, 120, 60, 120, battle_icon, true);
 
-    // Initialize deck tab (inactive, top) - set tab=true for display but don't include in selections
-    init_button(&buttons[4], true, 0, 0, 60, 120, NULL, NULL);
-    customize_button(&buttons[4], 83, 83, NULL, deck_icon);
-    customize_border(&buttons[4], 2, 255, 255);
-    customize_icon(&buttons[4], true, true, true, 0, 0);
-    buttons[4].active = false;  // Explicitly set inactive even though it's a tab
+    // Initialize deck tab (inactive, top)
+    setup_tab_button(&buttons[4], 0, 0, 60, 120, deck_icon, false);
 
     // Chest slots area
     init_button(&buttons[1], false, 75, 0, 50, 240, NULL, NULL);
@@ -376,55 +463,46 @@ screen_t *init_screens(void) {
     init_button(&buttons[3], false, 280, 205, exit_button->width, exit_button->height, NULL, NULL);
     customize_border(&buttons[3], 2, 255, 255);
 
-    // Assign buttons to primary selections (deck tab not included)
-    primary_selections[0].button = &buttons[0];  // Battle tab
-    primary_selections[1].button = &buttons[1];  // Chest slots
-    primary_selections[2].button = &buttons[2];  // Start game
-    primary_selections[3].button = &buttons[3];  // Exit
+    // XP/Level indicator (new UI element from screenshot)
+    init_button(&buttons[4], false, 280, 20, 30, 15, NULL, NULL);
+    customize_button(&buttons[4], 83, 83, NULL, NULL);
+
+    // Assign buttons to primary selections
+    main->primary_selections[0].button = &buttons[0];  // Battle tab
+    main->primary_selections[1].button = &buttons[1];  // Chest slots
+    main->primary_selections[2].button = &buttons[2];  // Start game
+    main->primary_selections[3].button = &buttons[3];  // Exit
 
     // Initialize secondary selections
     for (int i = 0; i < num_selections; i++) {
-        primary_selections[i].secondary_selection_index = -1;
-        primary_selections[i].num_secondary_selections = 0;
+        main->primary_selections[i].secondary_selection_index = -1;
+        main->primary_selections[i].num_secondary_selections = 0;
     }
 
     // Set up chest slots secondary selections
-    primary_selections[1].num_secondary_selections = num_secondary_selections;
+    main->primary_selections[1].num_secondary_selections = num_secondary_selections;
     secondary_selection_t *secondary_selections = CR_MALLOC(sizeof(secondary_selection_t));
     button_t *chest_slots = CR_MALLOC(sizeof(button_t) * num_secondary_selections);
     secondary_selections->buttons = chest_slots;
-    
-    // Initialize chest slots
-    init_chest_slots(main, chest_slots);
-    primary_selections[1].secondary_selections = secondary_selections;
 
-    // Finish main screen setup
-    main->primary_selections = primary_selections;
-    main->selection_index = 0;
-    main->active = true;
-    main->data = &data;
-    set_selection_delay(main, 150);
+    init_chest_slots(main, chest_slots);
+    main->primary_selections[1].secondary_selections = secondary_selections;
 
     // Set up linked screens
     screen_t *deck = init_deck_screen(&data);
+    screen_t *collection = init_collection_screen(&data);
+    screen_t *battle_results = init_battle_results_screen(&data);
+
     main->next = deck;
+    deck->next = collection;
+    collection->next = battle_results;
 
     // Initialize chest opening screen
-    screen_t *chest_opening = CR_MALLOC(sizeof(screen_t));
-    char *chest_name = "chest_opening";
-    chest_opening->name = CR_MALLOC(sizeof(char) * strlen(chest_name) + 1);
-    strcpy(chest_opening->name, chest_name);
-    
-    chest_opening->num_primary_selections = 1;
-    chest_opening->primary_selections = CR_MALLOC(sizeof(primary_selection_t));
-    
+    screen_t *chest_opening = create_screen("chest_opening", 1, &data);
     button_t *chest_button = CR_MALLOC(sizeof(button_t));
     init_button(chest_button, false, 100, 100, 100, 20, continue_chest_opening, NULL);
     chest_opening->primary_selections[0].button = chest_button;
-    
-    chest_opening->active = false;
-    chest_opening->next = NULL;
-    deck->next = chest_opening;
+    battle_results->next = chest_opening;
 
     return main;
 }
@@ -466,12 +544,8 @@ void free_ui(void) {
 }
 
 void draw_icon(icon_t icon) {
-    // Safety check for null sprite pointer
-    if (icon.sprite == NULL) {
-        return;
-    }
-    
-    // Draw sprite with transparency flag
+    if (icon.sprite == NULL) return;
+
     if (icon.transparent) {
         gfx_TransparentSprite(icon.sprite, icon.x, icon.y);
     } else {
@@ -479,85 +553,102 @@ void draw_icon(icon_t icon) {
     }
 }
 
+void draw_button_border(button_t *button, bool selected) {
+    (void)selected; // Suppress unused parameter warning
+    if (button->border.weight <= 0) return;
+
+    gfx_SetColor(button->border.color);
+    gfx_FillRectangle(button->x, button->y, button->width, button->border.weight);
+    gfx_FillRectangle(button->x, (button->y + button->height) - button->border.weight, button->width, button->border.weight);
+    gfx_FillRectangle(button->x, button->y, button->border.weight, button->height);
+    gfx_FillRectangle(button->x + button->width - button->border.weight, button->y, button->border.weight, button->height);
+}
+
+void draw_button(button_t *button, bool selected) {
+    gfx_SetColor(button->color);
+    gfx_FillRectangle(button->x, button->y, button->width, button->height);
+
+    if (button->active || selected) {
+        draw_button_border(button, selected);
+    }
+
+    if (button->has_icon) {
+        draw_icon(button->icon);
+    }
+}
+
+void draw_inactive_tab(screen_t *current_screen, screen_t *other_screen, const char *current_name) {
+    button_t *inactive_tab = NULL;
+
+    if (strcmp(current_name, "main") == 0) {
+        inactive_tab = other_screen->primary_selections[0].button;
+    } else if (strcmp(current_name, "deck") == 0) {
+        inactive_tab = current_screen->primary_selections[1].button;
+    }
+
+    if (inactive_tab != NULL) {
+        draw_button(inactive_tab, false);
+    }
+}
+
 void draw_elixir_overlay(screen_t *screen) {
-    
+    (void)screen; // Suppress unused parameter warning
+    // Implementation for elixir bar drawing
 }
 
 void draw_screen(screen_t *screen) {
-    screen_t *current_screen = screen;
-    if (current_screen != NULL) {
-        screen_t *other_screen = current_screen->next;
-        if (strcmp(current_screen->name, "main") == 0) {
-            // Draw inactive deck tab
-            button_t *inactive_tab = &other_screen->primary_selections[0].button[0];
-            gfx_SetColor(inactive_tab->color);
-            gfx_FillRectangle(inactive_tab->x, inactive_tab->y, inactive_tab->width, inactive_tab->height);
-            if (inactive_tab->has_icon) {
-                draw_icon(inactive_tab->icon);
-            }
-        } else if (strcmp(current_screen->name, "deck") == 0) {
-            // Draw inactive battle tab
-            button_t *inactive_tab = &current_screen->primary_selections[1].button;
-            gfx_SetColor(inactive_tab->color);
-            gfx_FillRectangle(inactive_tab->x, inactive_tab->y, inactive_tab->width, inactive_tab->height);
-            if (inactive_tab->has_icon) {
-                draw_icon(inactive_tab->icon);
-            }
-            
-            // Deck title
-            gfx_Sprite(deck_text,280,15);
+    if (screen == NULL) return;
 
-            // Draw elixir bar based on current card selected
-            draw_elixir_overlay(current_screen->primary_selections);
-
-        }
+    // Draw inactive tabs and screen-specific elements
+    if (screen->next != NULL) {
+        draw_inactive_tab(screen, screen->next, screen->name);
     }
-    if (current_screen != NULL && current_screen->active == true) {
-        for (int i = 0; i < current_screen->num_primary_selections; i++) {
-            if (current_screen->primary_selections[i].num_secondary_selections == 0) {
-                // Handle primary selections without secondary selections
-                button_t *button = current_screen->primary_selections[i].button;
-                gfx_SetColor(button->color);
-                gfx_FillRectangle(button->x, button->y, button->width, button->height);
-                
-                if (button->border.weight > 0 && button->active == true) {
-                    gfx_SetColor(button->border.color);
-                    // Four rectangle fills (interior)
-                    gfx_FillRectangle(button->x, button->y, button->width, button->border.weight);
-                    gfx_FillRectangle(button->x, (button->y + button->height) - button->border.weight, button->width, button->border.weight);
-                    // Verticals
-                    gfx_FillRectangle(button->x, button->y, button->border.weight, button->height);
-                    gfx_FillRectangle(button->x + button->width - button->border.weight, button->y, button->border.weight, button->height);
-                }
 
-                if (button->has_icon == true ) {
-                    icon_t icon = button->icon;
-                    draw_icon(icon);
-                }
-            } else {
-                // Handle buttons with secondary selections
-                for (int j = 0; j < current_screen->primary_selections[i].num_secondary_selections; j++) {
-                    button_t *button = &current_screen->primary_selections[i].secondary_selections->buttons[j];
-                    gfx_SetColor(button->color);
-                    gfx_FillRectangle(button->x, button->y, button->width, button->height);
-                    
-                    // Draw border if selected
-                    if (button->border.weight > 0 && j == current_screen->primary_selections[i].secondary_selection_index) {
-                        gfx_SetColor(button->border.color);
-                        // Four rectangle fills (interior)
-                        gfx_FillRectangle(button->x, button->y, button->width, button->border.weight);
-                        gfx_FillRectangle(button->x, (button->y + button->height) - button->border.weight, button->width, button->border.weight);
-                        // Verticals
-                        gfx_FillRectangle(button->x, button->y, button->border.weight, button->height);
-                        gfx_FillRectangle(button->x + button->width - button->border.weight, button->y, button->border.weight, button->height);
-                    }
-                    
-                    // Draw icon regardless of selection state
-                    if (button->has_icon == true) {
-                        icon_t icon = button->icon;
-                        draw_icon(icon);
-                    }
-                }
+    if (strcmp(screen->name, "deck") == 0) {
+        gfx_Sprite(deck_text, 280, 15);
+        draw_elixir_overlay(screen);
+    } else if (strcmp(screen->name, "collection") == 0) {
+        // Draw "DECK" header text
+        gfx_SetColor(255);
+        gfx_PrintStringXY("DECK", 20, 10);
+
+        // Draw "COLLECTION" text at bottom
+        gfx_PrintStringXY("COLLECTION", 20, 195);
+
+        // Draw "USE" button text
+        gfx_PrintStringXY("USE", 105, 175);
+
+        // Draw selected card name placeholder
+        gfx_PrintStringXY("<card name>", 85, 175);
+    } else if (strcmp(screen->name, "battle_results") == 0) {
+        // Draw results screen elements
+        gfx_SetColor(255);
+        gfx_PrintStringXY("VICTORY!", 120, 10);
+        gfx_PrintStringXY("Continue", 130, 205);
+    }
+
+    // Draw screen-specific elements
+    if (strcmp(screen->name, "main") == 0) {
+        // Draw XP/Level indicator
+        gfx_SetColor(255);
+        gfx_PrintStringXY("15/40", 280, 25);
+    }
+
+    // Draw active screen buttons
+    if (!screen->active) return;
+
+    for (int i = 0; i < screen->num_primary_selections; i++) {
+        primary_selection_t *primary = &screen->primary_selections[i];
+
+        if (primary->num_secondary_selections == 0) {
+            // Primary button without secondary selections
+            draw_button(primary->button, false);
+        } else {
+            // Secondary buttons
+            for (int j = 0; j < primary->num_secondary_selections; j++) {
+                button_t *button = &primary->secondary_selections->buttons[j];
+                bool selected = (j == primary->secondary_selection_index);
+                draw_button(button, selected);
             }
         }
     }
@@ -704,8 +795,7 @@ void handle_screens(screen_t *screens) {
 
         // Check if there are secondary selections
         if (primary->num_secondary_selections > 0 && screen->primary_selections[screen->selection_index].secondary_selection_index > 0) {
-            // Get the current secondary selection index
-            int current_secondary_index = primary->secondary_selection_index;
+            // Move to previous secondary selection
             screen->primary_selections[screen->selection_index].secondary_selection_index--;
             delay(screen->delay);
 
@@ -736,8 +826,7 @@ void handle_screens(screen_t *screens) {
             // Get the current secondary selection index
 
             if (primary->num_secondary_selections > 0 && screen->primary_selections[screen->selection_index].secondary_selection_index < primary->num_secondary_selections - 1) {
-                // Get the current secondary selection index
-                int current_secondary_index = primary->secondary_selection_index;
+                // Move to next secondary selection
                 screen->primary_selections[screen->selection_index].secondary_selection_index++;
                 delay(screen->delay);
             }
@@ -819,54 +908,6 @@ void shuffle_card_indices(int *indices, int size) {
     }
 }
 
-// OLD: Shuffle deck in-place (COMMENTED OUT - keeping for reference)
-/*
-void shuffle_cards(card_t *cards, int size) {
-    for (int i = 0; i < size; i++) {
-        int j = rand() % size;
-
-        card_t *temp = &cards[i];
-        cards[i] = cards[j];
-        cards[j] = *temp;
-    }
-}
-*/
-
-// COMMENTED OUT: assign_cards function no longer needed with index-based system
-/*
-// Randomly assign cards to the target deck
-void assign_cards(card_t *template_deck, card_t *target_deck, int template_size, int target_size) {
-    // Choose randomly from range of template deck size
-    // Then assign it to each array value in target deck
-    // Then shuffle deck
-
-    // Array to mark which template_deck indices have been selected
-    bool *selected = CR_CALLOC(template_size, sizeof(bool));
-    
-    int num_selected = 0;
-    int temp_index;
-    
-    // Seed the random number generator
-    // srand(time());
-    
-    // Assign random cards to the target deck
-    while (num_selected < target_size) {
-        // Generate a random index for the template_deck
-        temp_index = rand() % template_size;
-
-        // If the card at temp_index hasn't been selected yet, assign it to the target deck
-        if (!selected[temp_index]) {
-            target_deck[num_selected] = template_deck[temp_index];  // Copy the card
-            selected[temp_index] = true; // Mark this index as selected
-            num_selected++;
-        }
-    }
-
-    CR_FREE(selected);
-
-    shuffle_cards(target_deck, target_size);
-}
-*/
 
 void init_cursor(card_t *card, gfx_sprite_t *cursor) {
     card->cursor.sprite = cursor;
@@ -1096,21 +1137,7 @@ void start_menu(void) {
         handle_screens(screens);
         gfx_FillScreen(80);
         
-        // Can still use active screen for drawing
         draw_screen(active);
-        
-        // Debug info using current active screen
-        if (active != NULL) {
-            gfx_PrintStringXY("Primary Selection Index: ", 10, 10);
-            gfx_PrintInt(active->selection_index, 1);
-            gfx_PrintStringXY("Secondary Selection Index: ", 10, 20);
-            gfx_PrintInt(active->primary_selections[active->selection_index].secondary_selection_index, 1);
-            gfx_PrintStringXY("# Secondary Selections: ", 10, 30);
-            gfx_PrintInt(active->primary_selections[1].num_secondary_selections, 1);
-            
-            gfx_PrintStringXY("Current Screen: ", 10, 40);
-            gfx_PrintString(active->name);
-        }
         
         gfx_BlitBuffer();
 

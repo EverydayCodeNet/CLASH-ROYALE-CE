@@ -27,7 +27,7 @@ player_t *init_player(bool opponent, card_t *deck) {
     
     // Shuffle the deck indices for variety
     shuffle_card_indices(player->deck->card_indices, 8);
-    player->elixir = 0;
+    player->elixir = 5;
     player->cursor.x = x;
     player->cursor.y = y;
     player->towers_destroyed = 0;

@@ -13,3 +13,4 @@ src/gfx/*.c
 src/gfx/*.h
 makefile
 /planning/
+.psd
