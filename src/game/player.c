@@ -9,8 +9,9 @@ void shuffle_card_indices(int *indices, int size);
 player_t *init_player(bool opponent, card_t *deck) {
     player_t *player = CR_MALLOC(sizeof(player_t));
     const int SCREEN_HEIGHT = 240;
-    const int x = SCREEN_HEIGHT / 2;
-    const int y = 100;
+    // Initialize cursor in the middle of player's placement area
+    const int x = opponent ? 260 : 85;  // opponent: 260 (right side 200-320), player: 85 (left side 0-170)
+    const int y = 120;  // middle of screen height
     player->troops = NULL;
     player->spells = NULL;
     player->buildings = NULL;

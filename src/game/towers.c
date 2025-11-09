@@ -122,28 +122,28 @@ void draw_towers(player_t *player) {
 }
 
 // void update_towers(Player *player,Tower *enemyTowers[], Troop *troops[]) {
-    // bool troopInRange;
-    // for (int i = 0; i < NUM_TOWERS; i++) {
-    //     // this is a terrible 
-    //     if (i < 2) {
-    //         if (enemyTowers[i]->health <= 0) {
-    //             enemyTowers[2]->active = true;
-    //         }
-    //         if (enemyTowers[i]->health <= 0) enemyTowers[i]->active = false;
-    //     } else if (i == 2){
-    //         if (enemyTowers[i]->health < KING_TOWER_MAX_HEALTH) enemyTowers[i]->active = true;
-    //     }
+//     bool troopInRange;
+//     for (int i = 0; i < NUM_TOWERS; i++) {
+//         // this is a terrible 
+//         if (i < 2) {
+//             if (enemyTowers[i]->health <= 0) {
+//                 enemyTowers[2]->active = true;
+//             }
+//             if (enemyTowers[i]->health <= 0) enemyTowers[i]->active = false;
+//         } else if (i == 2){
+//             if (enemyTowers[i]->health < KING_TOWER_MAX_HEALTH) enemyTowers[i]->active = true;
+//         }
     
-    //     if (player->numTroops > 0) {
-    //         if (enemyTowers[i]->nearestTroop >= player->numTroops || enemyTowers[i]->nearestTroop == -1) {
-    //             findNearestTroop(player,enemyTowers[i],troops);
-    //         } 
-    //         if (enemyTowers[i]->nearestTroop != -1) {
-    //             troopInRange = inRange(enemyTowers[i]->x, enemyTowers[i]->y,troops[enemyTowers[i]->nearestTroop]->x,troops[enemyTowers[i]->nearestTroop]->y, enemyTowers[i]->range);
-    //             if (enemyTowers[i]->active == true && troopInRange == true) {
-    //                 troops[enemyTowers[i]->nearestTroop]->health -= 20;
-    //             } 
-    //         }
-    //     }
-    // }
+//         if (player->numTroops > 0) {
+//             if (enemyTowers[i]->nearestTroop >= player->numTroops || enemyTowers[i]->nearestTroop == -1) {
+//                 findNearestTroop(player,enemyTowers[i],troops);
+//             } 
+//             if (enemyTowers[i]->nearestTroop != -1) {
+//                 troopInRange = inRange(enemyTowers[i]->x, enemyTowers[i]->y,troops[enemyTowers[i]->nearestTroop]->x,troops[enemyTowers[i]->nearestTroop]->y, enemyTowers[i]->range);
+//                 if (enemyTowers[i]->active == true && troopInRange == true) {
+//                     troops[enemyTowers[i]->nearestTroop]->health -= 20;
+//                 } 
+//             }
+//         }
+//     }
 // }

@@ -41,66 +41,65 @@ bool is_out_of_bounds(position_t pos) {
 
 void draw_placement_bounds(player_t *player, card_t *selected_card, tower_t *enemy_towers) {
     if (selected_card == NULL) return;
-    
+
     // Only show bounds for troops and buildings, not spells
     if (selected_card->type == SPELL) return;
-    
+
     gfx_SetColor(1); // Red color
-    
-    bounds_t *bounds = player->bounds;
-    
-    // Draw boundary rectangles
-    // Right boundary (river line)
-    int right_x = bounds->points[1].x;
-    gfx_FillRectangle(right_x - BOUNDARY_WIDTH, 0, BOUNDARY_WIDTH, SCREEN_HEIGHT);
-    
-    // Back boundary 
-    gfx_FillRectangle(SCREEN_WIDTH - BOUNDARY_WIDTH, 0, BOUNDARY_WIDTH, SCREEN_HEIGHT);
-    
-    // Check for destroyed towers to draw middle line
-    bool left_tower_down = (enemy_towers[0].health <= 0);
-    bool right_tower_down = (enemy_towers[1].health <= 0);
-    bool draw_middle = left_tower_down ^ right_tower_down; // XOR - only one down
-    
-    if (draw_middle) {
-        // Draw middle separation line
-        int line_y = SCREEN_HEIGHT / 2 - BOUNDARY_WIDTH / 2;
-        gfx_FillRectangle(RIVER_X - BOUNDARY_WIDTH, line_y, TILE_SIZE * 4 + BOUNDARY_WIDTH, BOUNDARY_WIDTH);
+
+    // Draw the RESTRICTED zone (where player CANNOT place)
+    // For player: restricted zone is x from 170 to 320
+    // This is OPPOSITE of player->bounds which shows where they CAN place
+
+    int restricted_min_x = 170;
+    int restricted_max_x = SCREEN_HEIGHT; // 320
+
+    // Check for destroyed towers to extend the restricted zone
+    bool top_tower_down = (enemy_towers[0].health <= 0);
+    bool bottom_tower_down = (enemy_towers[1].health <= 0);
+
+    if (top_tower_down && bottom_tower_down) {
+        // Both towers down - restricted zone shrinks to 220-320
+        restricted_min_x = 220;
+    } else if (top_tower_down || bottom_tower_down) {
+        // One tower down - restricted zone shrinks to 210-320 (split)
+        restricted_min_x = 210;
     }
-    
-    // Draw extended boundaries based on destroyed towers
-    if (left_tower_down || right_tower_down) {
-        int x_offset = (left_tower_down || right_tower_down) ? TILE_SIZE * 4 : 0;
-        
-        if (left_tower_down) {
-            // Top half extension
-            gfx_FillRectangle(RIVER_X + x_offset, 0, BOUNDARY_WIDTH, SCREEN_HEIGHT / 2);
-            gfx_FillRectangle(RIVER_X, 0, x_offset + BOUNDARY_WIDTH, BOUNDARY_WIDTH);
-        }
-        
-        if (right_tower_down) {
-            // Bottom half extension  
-            gfx_FillRectangle(RIVER_X + x_offset, SCREEN_HEIGHT / 2, BOUNDARY_WIDTH, SCREEN_HEIGHT / 2);
-            gfx_FillRectangle(RIVER_X, SCREEN_HEIGHT - BOUNDARY_WIDTH, x_offset + BOUNDARY_WIDTH, BOUNDARY_WIDTH);
-        }
+
+    // Draw left boundary line (the river edge)
+    gfx_FillRectangle(restricted_min_x, 0, BOUNDARY_WIDTH, SCREEN_WIDTH);
+
+    // Draw right boundary line (back edge)
+    gfx_FillRectangle(restricted_max_x - BOUNDARY_WIDTH, 0, BOUNDARY_WIDTH, SCREEN_WIDTH);
+
+    // Draw top boundary line
+    gfx_FillRectangle(restricted_min_x, 0, restricted_max_x - restricted_min_x, BOUNDARY_WIDTH);
+
+    // Draw bottom boundary line
+    gfx_FillRectangle(restricted_min_x, SCREEN_WIDTH - BOUNDARY_WIDTH, restricted_max_x - restricted_min_x, BOUNDARY_WIDTH);
+
+    // Draw middle split line when only one tower is down
+    if (top_tower_down ^ bottom_tower_down) {
+        int line_y = SCREEN_WIDTH / 2 - BOUNDARY_WIDTH / 2; // Middle of the screen (y=120)
+        gfx_FillRectangle(restricted_min_x, line_y, restricted_max_x - restricted_min_x, BOUNDARY_WIDTH);
     }
 }
 
 // Constrain cursor to valid placement area
 void constrain_cursor_to_bounds(player_t *player, card_t *selected_card) {
     if (selected_card == NULL) return;
-    
+
     cursor_t *cursor = &player->cursor;
-    
+
     if (selected_card->type == SPELL) {
         // Spells can go anywhere - just constrain to screen
         cursor->x = MAX(0, MIN(cursor->x, SCREEN_WIDTH - 1));
         cursor->y = MAX(0, MIN(cursor->y, SCREEN_HEIGHT - 1));
         return;
     }
-    
+
     bounds_t *bounds = player->bounds;
-    
+
     // Constrain to current placement bounds
     cursor->x = MAX(bounds->points[0].x, MIN(cursor->x, bounds->points[1].x));
     cursor->y = MAX(bounds->points[0].y, MIN(cursor->y, bounds->points[3].y));
@@ -110,14 +109,14 @@ void constrain_cursor_to_bounds(player_t *player, card_t *selected_card) {
 bool is_position_valid(player_t *player, cursor_t cursor, card_t *card) {
     if (card->type == SPELL) {
         // Spells can be placed anywhere on the map
-        return (cursor.x >= 0 && cursor.x < SCREEN_WIDTH && 
+        return (cursor.x >= 0 && cursor.x < SCREEN_WIDTH &&
                 cursor.y >= 0 && cursor.y < SCREEN_HEIGHT);
     }
-    
+
     bounds_t *bounds = player->bounds;
     int x = cursor.x;
     int y = cursor.y;
-    
+
     // Point-in-polygon test for rectangular bounds
     return (x >= bounds->points[0].x && x <= bounds->points[1].x &&
             y >= bounds->points[0].y && y <= bounds->points[3].y);
@@ -128,52 +127,53 @@ void update_placement_bounds(game_t *game) {
     player_t *player = game->player;
     player_t *opponent = game->opponent;
     tower_t *enemy_towers = opponent->towers;
-    
+
     // Check which enemy towers are destroyed
-    bool left_tower_down = (enemy_towers[0].health <= 0);
-    bool right_tower_down = (enemy_towers[1].health <= 0);
+    bool top_tower_down = (enemy_towers[0].health <= 0);
+    bool bottom_tower_down = (enemy_towers[1].health <= 0);
     bool king_tower_down = (enemy_towers[2].health <= 0);
-    
+
     // Update player bounds based on destroyed enemy towers
-    if (left_tower_down || right_tower_down) {
-        int x_offset = TILE_SIZE * 4;
-        
-        if (left_tower_down) {
-            // Can place deeper in top half
-            player->bounds->points[1].x = RIVER_X + x_offset; // Top-right extends
+    // Player can extend rightward into enemy territory (from initial x=170)
+    if (top_tower_down || bottom_tower_down) {
+        int x_offset = TILE_SIZE * 4;  // 40 pixels
+
+        if (top_tower_down) {
+            // Can place deeper in top half - extend top-right corner
+            player->bounds->points[1].x = 170 + x_offset; // Top-right extends (210)
         }
-        
-        if (right_tower_down) {
-            // Can place deeper in bottom half  
-            player->bounds->points[2].x = RIVER_X + x_offset; // Bottom-right extends
+
+        if (bottom_tower_down) {
+            // Can place deeper in bottom half - extend bottom-right corner
+            player->bounds->points[2].x = 170 + x_offset; // Bottom-right extends (210)
         }
-        
-        if (left_tower_down && right_tower_down) {
-            // Both princess towers down - full access to enemy side
-            player->bounds->points[1].x = SCREEN_WIDTH;
-            player->bounds->points[2].x = SCREEN_WIDTH;
+
+        if (top_tower_down && bottom_tower_down) {
+            // Both princess towers down - can place up to x=220
+            player->bounds->points[1].x = 220;
+            player->bounds->points[2].x = 220;
         }
     }
-    
-    // Mirror logic for opponent bounds (enemy of player towers)
+
+    // Mirror logic for opponent bounds (extends leftward into player territory from initial x=200)
     tower_t *player_towers = player->towers;
-    bool player_left_down = (player_towers[0].health <= 0);
-    bool player_right_down = (player_towers[1].health <= 0);
-    
-    if (player_left_down || player_right_down) {
-        int x_offset = TILE_SIZE * 4;
-        
-        if (player_left_down) {
-            opponent->bounds->points[0].x = RIVER_X - x_offset; // Top-left extends
+    bool player_top_down = (player_towers[0].health <= 0);
+    bool player_bottom_down = (player_towers[1].health <= 0);
+
+    if (player_top_down || player_bottom_down) {
+        int x_offset = TILE_SIZE * 4;  // 40 pixels
+
+        if (player_top_down) {
+            opponent->bounds->points[0].x = 200 - x_offset; // Top-left extends (160)
         }
-        
-        if (player_right_down) {
-            opponent->bounds->points[3].x = RIVER_X - x_offset; // Bottom-left extends
+
+        if (player_bottom_down) {
+            opponent->bounds->points[3].x = 200 - x_offset; // Bottom-left extends (160)
         }
-        
-        if (player_left_down && player_right_down) {
-            opponent->bounds->points[0].x = 0;
-            opponent->bounds->points[3].x = 0;
+
+        if (player_top_down && player_bottom_down) {
+            opponent->bounds->points[0].x = 150;
+            opponent->bounds->points[3].x = 150;
         }
     }
 }
@@ -188,25 +188,25 @@ void init_bounds(game_t *game) {
     game->player->bounds->num_points = 4;
     game->player->bounds->points = CR_MALLOC(sizeof(point_t) * 4);
     
-    // Initial player bounds (before any towers destroyed)
-    game->player->bounds->points[0] = (point_t){0, 0};                    // Top-left
-    game->player->bounds->points[1] = (point_t){RIVER_X, 0};              // Top-right
-    game->player->bounds->points[2] = (point_t){RIVER_X, SCREEN_HEIGHT};  // Bottom-right  
-    game->player->bounds->points[3] = (point_t){0, SCREEN_HEIGHT};        // Bottom-left
+    // Initial player bounds: x from 0 to 170, y from 0 to 240 (WHERE PLAYER CAN PLACE - left side)
+    game->player->bounds->points[0] = (point_t){0, 0};                      // Top-left
+    game->player->bounds->points[1] = (point_t){170, 0};                    // Top-right
+    game->player->bounds->points[2] = (point_t){170, SCREEN_WIDTH};         // Bottom-right
+    game->player->bounds->points[3] = (point_t){0, SCREEN_WIDTH};           // Bottom-left
 
-    // Opponent bounds (right side of map)
+    // Opponent bounds (WHERE OPPONENT CAN PLACE - right side)
     game->opponent->bounds = CR_MALLOC(sizeof(bounds_t));
     game->opponent->bounds->visible = false;
     game->opponent->bounds->placement_allowed = true;
-    game->opponent->bounds->movement_allowed = true;
+    game->opponent->bounds->movement_allowed = false;  // Bounds are for placement only, not movement
     game->opponent->bounds->num_points = 4;
     game->opponent->bounds->points = CR_MALLOC(sizeof(point_t) * 4);
-    
-    // Initial opponent bounds
-    game->opponent->bounds->points[0] = (point_t){RIVER_X, 0};                // Top-left
-    game->opponent->bounds->points[1] = (point_t){SCREEN_WIDTH, 0};           // Top-right
-    game->opponent->bounds->points[2] = (point_t){SCREEN_WIDTH, SCREEN_HEIGHT}; // Bottom-right
-    game->opponent->bounds->points[3] = (point_t){RIVER_X, SCREEN_HEIGHT};    // Bottom-left
+
+    // Initial opponent bounds: x from 200 to 320, y from 0 to 240 (WHERE OPPONENT CAN PLACE - right side)
+    game->opponent->bounds->points[0] = (point_t){200, 0};                  // Top-left
+    game->opponent->bounds->points[1] = (point_t){SCREEN_HEIGHT, 0};        // Top-right
+    game->opponent->bounds->points[2] = (point_t){SCREEN_HEIGHT, SCREEN_WIDTH}; // Bottom-right
+    game->opponent->bounds->points[3] = (point_t){200, SCREEN_WIDTH};       // Bottom-left
 }
 
 
@@ -1510,15 +1510,13 @@ void run_game(game_t *game) {
     while (exit == false) {
         kb_Scan();
 
-        // ADDED BACK: Card selection handling
         handle_keys(player);
 
-        // ADDED BACK: Timer update
         update_timer(game);
 
         // COMMENTED OUT: Complex game logic - rebuild incrementally
         update_elixir(game);
-        // update_towers(game);
+        update_towers(game);
         // update_troops(game);
         // update_buildings(game);
         // update_spells(game);
@@ -1530,7 +1528,7 @@ void run_game(game_t *game) {
         // COMMENTED OUT: Complex rendering - rebuild incrementally
         // draw_tiles();
         draw_map(game);
-        // draw_troops(game);
+        draw_troops(game);
         // draw_buildings(game);
         // draw_spells(game);
         // draw_projectiles(game);
@@ -1541,11 +1539,9 @@ void run_game(game_t *game) {
         //     if (kb_Data[1] & kb_Mode) view_opponent = !view_opponent;
         // }
 
-        // SIMPLIFIED: Just draw player's deck/modal
+        // Draw player's deck/modal with cursor and bounds
         if (view_opponent == false) {
-            draw_card_carousel(player);
-            // COMMENTED OUT: Cursor and bounds rendering
-            // draw_player_modal(player, opponent->towers);
+            draw_player_modal(player, opponent->towers);
         }
         // COMMENTED OUT: Opponent view
         // else {
