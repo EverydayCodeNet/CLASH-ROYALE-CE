@@ -1,5 +1,6 @@
 #include <tice.h>
 #include <graphx.h>
+#include <fileioc.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -26,9 +27,6 @@ void draw_main_tabs(void) {
     // Draw battle tab (bottom, active)
     gfx_SetColor(116);
     gfx_FillRectangle(0, 120, 60, 120);
-    // gfx_SetColor(255);
-    // gfx_Rectangle(0, 120, 60, 120);
-    // gfx_Rectangle(1, 121, 58, 118);
     gfx_TransparentSprite(battle_icon, 10, 160);
 
     // Draw deck tab (top, inactive)
@@ -41,16 +39,11 @@ void draw_deck_tabs(void) {
     // Draw deck tab (top, active)
     gfx_SetColor(116);
     gfx_FillRectangle(0, 0, 60, 120);
-    // Always "selected" display for tabs - experimenting with removing this
-    // gfx_SetColor(255);
-    // gfx_Rectangle(0, 0, 60, 120);
-    // gfx_Rectangle(1, 1, 58, 118);
     gfx_TransparentSprite(deck_icon, 10, 40);
 
     // Draw battle tab (bottom, inactive)
     gfx_SetColor(83);
     gfx_FillRectangle(0, 120, 60, 120);
-    
     gfx_TransparentSprite(battle_icon, 10, 160);
 }
 
@@ -87,12 +80,10 @@ void draw_main_screen(void) {
     gfx_Sprite(exit_button, 280, 200);
 
     // Draw trophy count
-    gfx_TransparentSprite(trophy, 285, 15);    
-    // draw_rotated_text(trophies)
+    gfx_TransparentSprite(trophy, 285, 15);
 
     // Draw coin count
     gfx_TransparentSprite(gold_coin, 285, 80);
-    // draw_rotated_text(trophies)
 
     // Handle tab navigation
     if (selected_row == 0 && (kb_Data[7] & kb_Up)) {
@@ -197,11 +188,22 @@ void draw_deck_screen(void) {
     // gfx_Rectangle(175, 15, 150, 200);
 
     for (int i = 0; i < 8; i++) {
-        gfx_SetColor(255);
+        gfx_SetColor(0);
         if (i == selected_card) gfx_SetColor(171);
         // Card 0-3 are right column (top to bottom), 4-7 are left column (top to bottom)
         int x = (i < 4) ? 225 : 175;
         int y = 15 + ((i < 4) ? i : (i - 4)) * 40;
+
+        // Draw card sprite inside the rectangle
+        if (data.deck != NULL) {
+            gfx_sprite_t *card_sprite = data.deck[i].sprite;
+           
+            if (card_sprite != NULL) {
+                gfx_Sprite(card_sprite, x, y);
+            }
+        }
+        // Debug sprite
+        // gfx_Sprite(musketeer_card, x, y);
         gfx_Rectangle(x, y, 40, 30);
     }
 
@@ -213,12 +215,34 @@ void draw_deck_screen(void) {
     // Moving between cards - delay between cards
     if (selected_card > -1) {
 
-        // Elixir bar
-        // Draw the elixir based on how much it costs - segment
-        gfx_SetColor(202);
+        // Elixir bar - show selected card's elixir cost
+        int elixir_cost = 0;
+        if (data.deck != NULL) {
+            elixir_cost = data.deck[selected_card].elixir;
+        }
+
+        // Draw empty portion first (dark purple background)
+        gfx_SetColor(55);
         gfx_FillRectangle(175, 175, 90, 20);
+
+        // Draw filled portion based on elixir cost (max 10 elixir, 9px per elixir)
+        gfx_SetColor(202);
+        gfx_FillRectangle(175, 175, elixir_cost * 9, 20);
+
+        // Draw segment lines (black vertical lines every 9px)
         gfx_SetColor(0);
+        for (int i = 0; i <= 9; i++) {
+            gfx_VertLine(175 + i * 9, 175, 20);
+        }
+
+        // Draw outer border
         gfx_Rectangle(175, 175, 90, 20);
+
+        // Draw elixir cost number
+        char elixir_str[4];
+        sprintf(elixir_str, "%d", elixir_cost);
+        gfx_SetTextFGColor(255);
+        gfx_PrintStringXY(elixir_str, 215, 178);
 
         // kb_Up = move right in UI (left column to right column)
         if ((kb_Data[7] & kb_Up) && selected_card > 0) {
@@ -259,10 +283,6 @@ void draw_gameover(void) {
 
     gfx_FillScreen(80);
 
-    // Draw victory/defeat status
-    // gfx_SetTextFGColor(255);
-    // gfx_PrintStringXY("VICTORY!", 120, 10);
-
     // Draw crown count (0-3 crowns earned)
     // Left side - Player crowns
     gfx_RotatedScaledTransparentSprite(empty_crown, 180, 60, 0, 128);
@@ -274,22 +294,8 @@ void draw_gameover(void) {
     gfx_RotatedScaledTransparentSprite(empty_crown, 250, 100, 0, 128);
     gfx_RotatedScaledTransparentSprite(empty_crown, 250, 140, 0, 128);
 
-    // gfx_TransparentSprite(blue_crown, 30, 50);
-    // gfx_TransparentSprite(blue_crown, 30, 90);
-    // gfx_TransparentSprite(blue_crown, 30, 130);
-
-    // Right side - Opponent crowns - if they won, else
-    // gfx_TransparentSprite(red_crown, 280, 50);
-    // gfx_TransparentSprite(red_crown, 280, 90);
-    // gfx_TransparentSprite(red_crown, 280, 130);
-
     // Draw trophy reward/loss
     gfx_TransparentSprite(trophy, 122, 125);
-
-    // Trophy count
-    // gfx_PrintStringXY("+", )
-    // gfx_SetTextFGColor(255);
-    // gfx_PrintStringXY("+30", 170, 80);
 
     // Draw chest reward (if won)
     gfx_TransparentSprite(silver_chest, 110, 45);
@@ -299,7 +305,6 @@ void draw_gameover(void) {
 
     // Draw OK button
     gfx_TransparentSprite(ok_button, 30, 125);
-
 
     // Selected button - static to persist across frames
     static int selected_button = 0;
@@ -330,8 +335,7 @@ void draw_gameover(void) {
 }
 
 void draw_game(void) {
-    load_data();
-    init_deck(&data);  // CRITICAL: Initialize deck before init_game!
+    // Data and deck already initialized at startup
     game_t *game = init_game(&data);
 
     if (game) {
@@ -339,8 +343,6 @@ void draw_game(void) {
         free_game(game);
     }
 
-    save_data();
-    free_data(&data);
     current_screen = "gameover";
 }
 
@@ -372,17 +374,24 @@ void draw_screens(void) {
     }
 }
 
-int main(void) {    
+int main(void) {
     srand(rtc_Time());
     gfx_Begin();
     gfx_SetPalette(global_palette, sizeof_global_palette, 0);
     gfx_SetTransparentColor(170);
 
+    // Initialize data and deck at startup
+    load_data();
+    init_deck(&data);
+
     // Do we need a variable here to pass the current screen that should be drawn?
     draw_screens();
 
-    // Maybe everything should run downstream of main menu and loop back to that
     // Save data and cleanup here
+    save_data();
+    free_data(&data);
+
+    // Maybe everything should run downstream of main menu and loop back to that
     gfx_End();
     return 0;
 }

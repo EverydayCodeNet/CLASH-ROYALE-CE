@@ -62,9 +62,10 @@ typedef struct {
     gfx_sprite_t **attack_cycle;
     gfx_sprite_t **attack_cycle_rev;
 
-    // Use the projectile structure instead
-    // gfx_sprite_t *projectile;
-    projectile_t projectile;
+    // Projectile template (only sprite and speed needed)
+    gfx_sprite_t *projectile_sprite;
+    int projectile_speed;
+
     unsigned int movement_steps;
     unsigned int attack_steps;
     unsigned int movement_ticks;
@@ -135,6 +136,11 @@ typedef struct {
     unsigned int y;
 } point_t;
 
+typedef struct waypoint {
+    position_t position;
+    struct waypoint *next;
+} waypoint_t;
+
 typedef struct {
     bool visible;
     bool placement_allowed;
@@ -165,13 +171,20 @@ typedef struct{
     // gfx_sprite_t **projectile_sprites;
 
     position_t position;
-    projectile_t projectile;
+
+    // Projectile template (only sprite and speed needed)
+    gfx_sprite_t *projectile_sprite;
+    int projectile_speed;
 
     // void *nearest_troop;
     // nearest building
     // or just have nearest_enemies (generic linked list capable of any pointer)
     void *nearest_tower;
     void *nearest_target;
+
+    // Waypoint system for pathfinding
+    waypoint_t *path;
+    waypoint_t *current_waypoint;
 
     double movement_speed;
     double step_size;
@@ -225,9 +238,13 @@ typedef struct {
 
 typedef struct {
     gfx_sprite_t *sprite;;
-    // Can there be a nearest building? 
-    troop_t *nearest_troop; 
-    projectile_t projectile;
+    // Can there be a nearest building?
+    troop_t *nearest_troop;
+
+    // Projectile template (only sprite and speed needed)
+    gfx_sprite_t *projectile_sprite;
+    int projectile_speed;
+
     position_t position;
     unsigned int MAX_HEALTH;
     int health;

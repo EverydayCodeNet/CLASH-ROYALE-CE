@@ -12,7 +12,12 @@ void init_data_defaults(data_t *data) {
     data->trophies = 0;
     data->gold = 100;
     data->time_played = 0;
-    
+
+    // Initialize default deck order (0-7 in sequence)
+    for (int i = 0; i < 8; i++) {
+        data->deck_order[i] = i;
+    }
+
     // Initialize chests array
     data->chests = CR_MALLOC(sizeof(chest_t) * 4);
     for (int i = 0; i < 4; i++) {
@@ -38,10 +43,21 @@ void create_save(void) {
     if (!data_file_exists()) {
         init_data_defaults(&data);
     }
-    
+
+    // Create save_data_t from current data (only primitive values)
+    save_data_t save = {0};
+    save.games_played = data.games_played;
+    save.games_won = data.games_won;
+    save.trophies = data.trophies;
+    save.gold = data.gold;
+    save.time_played = data.time_played;
+    for (int i = 0; i < 8; i++) {
+        save.deck_order[i] = data.deck_order[i];
+    }
+
     ti_var_t slot;
     if ((slot = ti_Open("CRDATA", "w+"))) {
-        ti_Write(&data, sizeof(data), 1, slot);
+        ti_Write(&save, sizeof(save_data_t), 1, slot);
         ti_SetArchiveStatus(true, slot);
         ti_Close(slot);
     }
@@ -50,8 +66,30 @@ void create_save(void) {
 void load_data(void) {
     ti_var_t slot;
     if ((slot = ti_Open("CRDATA", "r"))) {
-        ti_Read(&data, sizeof(data), 1, slot);
+        save_data_t save = {0};
+        ti_Read(&save, sizeof(save_data_t), 1, slot);
         ti_Close(slot);
+
+        // Copy primitive values to data
+        data.games_played = save.games_played;
+        data.games_won = save.games_won;
+        data.trophies = save.trophies;
+        data.gold = save.gold;
+        data.time_played = save.time_played;
+        for (int i = 0; i < 8; i++) {
+            data.deck_order[i] = save.deck_order[i];
+        }
+
+        // Initialize runtime data (chests, etc.)
+        data.chests = CR_MALLOC(sizeof(chest_t) * 4);
+        for (int i = 0; i < 4; i++) {
+            data.chests[i].status = EMPTY;
+            data.chests[i].rarity = SILVER;
+            data.chests[i].gold = 0;
+            data.chests[i].total_cards = 0;
+            data.chests[i].unlock_step = 0;
+            data.chests[i].sprite = silver_chest;
+        }
     } else {
         // File doesn't exist, create defaults
         init_data_defaults(&data);
@@ -60,9 +98,20 @@ void load_data(void) {
 }
 
 void save_data(void) {
+    // Create save_data_t from current data (only primitive values)
+    save_data_t save = {0};
+    save.games_played = data.games_played;
+    save.games_won = data.games_won;
+    save.trophies = data.trophies;
+    save.gold = data.gold;
+    save.time_played = data.time_played;
+    for (int i = 0; i < 8; i++) {
+        save.deck_order[i] = data.deck_order[i];
+    }
+
     ti_var_t slot;
     if ((slot = ti_Open("CRDATA", "w+"))) {
-        ti_Write(&data, sizeof(data), 1, slot);
+        ti_Write(&save, sizeof(save_data_t), 1, slot);
         ti_SetArchiveStatus(true, slot);
         ti_Close(slot);
     }

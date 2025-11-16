@@ -37,8 +37,8 @@ void draw_tiles(void) {
     const int WALKWAY_CENTER = WALKWAY_SIZE / 2;
 
     // Left walkway - no rotation
-    gfx_RotatedScaledTransparentSprite(walkway_small, 50, 40, 0, 128);
-    gfx_RotatedScaledTransparentSprite(walkway_opponent_small, 140, 40, 0, 128);
+    // gfx_RotatedScaledTransparentSprite(walkway_small, 50, 40, 0, 128);
+    // gfx_RotatedScaledTransparentSprite(walkway_opponent_small, 140, 40, 0, 128);
 
     gfx_TransparentSprite(bridge,(18 * TILE_SIZE) + (TILE_SIZE / 2) - (bridge->width / 2),195 - (bridge->height / 2));
     gfx_TransparentSprite(bridge,(18 * TILE_SIZE) + (TILE_SIZE / 2) - (bridge->width / 2),65 - (bridge->height / 2));

@@ -10,9 +10,9 @@ palettes:
       # transparent color
       - color: {index: 170, r: 255, g: 0, b: 255}
 
-      # yellow 
+      # yellow
       - color: {index: 171, r: 255, g: 255, b: 0}
-      
+
       # green
       - color: {index: 158, r: 158, g: 181, b: 86}
 
@@ -27,8 +27,8 @@ palettes:
 
       # tower blue for health bars
       - color: {index: 151,r: 105,g: 170, b: 240}
-      
-      # main menu 
+
+      # main menu
       # unselected tab color
       - color: {index: 83, r: 70, g: 80, b: 100}
       # selected tab color
@@ -45,28 +45,123 @@ palettes:
     images: automatic
 
 converts:
-  - name: sprites
+  # Split into multiple smaller groups to stay under 64KB per AppVar
+
+  # Group 1: UI elements and small sprites
+  - name: ui_sprites
     palette: global_palette
-    transparent-color-index: 0
+    transparent-color-index: 170
     images:
-      # chests
-      - chests/*
-      - map/towers/*
-      - map/tiles/*
-      - ui/*
-      - cards/*
-      - cards/troops/giant/*
-      - cards/troops/balloon/*
-      - cards/troops/knight/*
-      - cards/troops/miner/*
-      - cards/troops/musketeer/*
-      - cards/buildings/elixir_collector/*
-      - cards/projectiles/*
-      
+      - cards/projectiles/arrow.png
+      - cards/projectiles/bullet.png
+      - ui/clock.png
+      - ui/battle_icon.png
+      - ui/deck_icon.png
+      - ui/trophy.png
+      - ui/blue_crown.png
+      - ui/red_crown.png
+      - ui/empty_crown.png
+      - ui/deck_text.png
+      - ui/gold_coin.png
+      - ui/exit_button.png
+      - ui/play_again.png
+      - ui/ok_button.png
+      - chests/silver_chest.png
+      - chests/gold_chest.png
+      - chests/magical_chest.png
+
+  # Group 2: Card sprites and towers
+  - name: card_sprites
+    palette: global_palette
+    transparent-color-index: 170
+    images:
+      - cards/miner_card.png
+      - cards/musketeer_card.png
+      - cards/balloon_card.png
+      - cards/giant_card.png
+      - cards/zap_card.png
+      - cards/poison_card.png
+      - cards/elixir_collector_card.png
+      - cards/knight_card.png
+      - map/towers/princess_tower.png
+      - map/towers/princess_tower_opponent.png
+      - map/towers/king_tower.png
+      - map/towers/king_tower_opponent.png
+
+  # Group 3: Map tiles and logo (large sprites)
+  - name: map_sprites
+    palette: global_palette
+    transparent-color-index: 170
+    images:
+      - map/tiles/grass.png
+      - map/tiles/riverbank.png
+      - map/tiles/riverbank_alt.png
+      - map/tiles/bridge.png
+      - map/tiles/walkway_small.png
+      - map/tiles/walkway_opponent_small.png
+      - ui/logo.png
+      - ui/battle.png
+
+  # Group 4: Miner and Musketeer troop animations
+  - name: troop_sprites1
+    palette: global_palette
+    transparent-color-index: 170
+    images:
+      - cards/troops/miner/miner_stepL.png
+      - cards/troops/miner/miner_stepR.png
+      - cards/troops/miner/miner_attack.png
+      - cards/troops/miner/miner_stepL_opp.png
+      - cards/troops/miner/miner_stepR_opp.png
+      - cards/troops/miner/miner_attack_opp.png
+      - cards/troops/musketeer/musketeer_stepN.png
+      - cards/troops/musketeer/musketeer_stepL.png
+      - cards/troops/musketeer/musketeer_stepR.png
+      - cards/troops/musketeer/musketeer_attack.png
+      - cards/troops/musketeer/musketeer_stepL_opp.png
+      - cards/troops/musketeer/musketeer_stepR_opp.png
+      - cards/troops/musketeer/musketeer_attack_opp.png
+
+  # Group 5: Giant and Knight troop animations
+  - name: troop_sprites2
+    palette: global_palette
+    transparent-color-index: 170
+    images:
+      - cards/troops/giant/g_stepN.png
+      - cards/troops/giant/g_stepL.png
+      - cards/troops/giant/g_stepR.png
+      - cards/troops/giant/g_attack.png
+      - cards/troops/giant/g_stepN_opp.png
+      - cards/troops/giant/g_stepL_opp.png
+      - cards/troops/giant/g_stepR_opp.png
+      - cards/troops/giant/g_attack_opp.png
+      - cards/troops/knight/knight_stepN.png
+      - cards/troops/knight/knight_stepL.png
+      - cards/troops/knight/knight_stepR.png
+      - cards/troops/knight/knight_attack.png
+      - cards/troops/knight/knight_stepN_opp.png
+      - cards/troops/knight/knight_stepL_opp.png
+      - cards/troops/knight/knight_stepR_opp.png
+      - cards/troops/knight/knight_attack_opp.png
+
+  # Group 6: Balloon and buildings
+  - name: troop_sprites3
+    palette: global_palette
+    transparent-color-index: 170
+    images:
+      - cards/troops/balloon/balloon.png
+      - cards/troops/balloon/balloon_opp.png
+      - cards/buildings/elixir_collector/elixir_collector.png
+
 outputs:
+  # Generate C header files for all sprite declarations
   - type: c
     include-file: gfx.h
     palettes:
       - global_palette
     converts:
-      - sprites
+      - ui_sprites
+      - card_sprites
+      - map_sprites
+      - troop_sprites1
+      - troop_sprites2
+      - troop_sprites3

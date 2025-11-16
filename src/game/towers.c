@@ -29,9 +29,8 @@ tower_t *create_tower(int x, int y, bool active, gfx_sprite_t *sprite) {
         tower->damage = 100;
         tower->attack_speed = 10;
         tower->attack_ticks = 0;
-        tower->projectile.sprite = arrow;
-        tower->projectile.damage = tower->damage;
-        tower->projectile.speed = 1;
+        tower->projectile_sprite = arrow;
+        tower->projectile_speed = 1;
         tower->MAX_HEALTH = PRINCESS_TOWER_MAX_HEALTH;
     } else {
         tower->active = false;
@@ -39,10 +38,8 @@ tower_t *create_tower(int x, int y, bool active, gfx_sprite_t *sprite) {
         tower->damage = 100;
         tower->attack_speed = 25;
         tower->attack_ticks = 0;
-        tower->projectile.sprite = bullet;
-        // Can move this to generic init_projectile function
-        tower->projectile.damage = tower->damage;
-        tower->projectile.speed = 1;
+        tower->projectile_sprite = bullet;
+        tower->projectile_speed = 1;
         tower->MAX_HEALTH = KING_TOWER_MAX_HEALTH;
     }
 

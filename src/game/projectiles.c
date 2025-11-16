@@ -76,11 +76,11 @@ projectile_t* create_tower_projectile(tower_t *tower, troop_t *target) {
     position_t tower_center = get_tower_center(tower);
     position_t target_center = get_troop_center(target);
     
-    projectile->sprite = tower->projectile.sprite;
+    projectile->sprite = tower->projectile_sprite;
     projectile->position = tower_center;
     projectile->target_type = TROOP;
     projectile->damage = tower->damage;
-    projectile->speed = tower->projectile.speed;
+    projectile->speed = tower->projectile_speed;
     projectile->target = target;
     projectile->next = NULL;
     projectile->prev = NULL;

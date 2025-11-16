@@ -7,6 +7,18 @@ extern "C" {
 
 #include "structs.h"
 
+// Persistent save data (written to file)
+typedef struct {
+    unsigned int games_played;
+    unsigned int games_won;
+    unsigned int trophies;
+    unsigned int gold;
+    unsigned int time_played;
+
+    // Deck order - indices into available_cards (0-7)
+    int deck_order[8];
+} save_data_t;
+
 typedef struct {
     unsigned int games_played;
     unsigned int games_won;
@@ -22,6 +34,9 @@ typedef struct {
 
     unsigned int time_played;
     chest_t *chests;
+
+    // Deck order for persistence
+    int deck_order[8];
 
     // How should I store the chest slots?
     // Do they need to be in persistent data?

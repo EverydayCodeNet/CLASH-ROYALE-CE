@@ -93,6 +93,14 @@ void customize_button(button_t *button, int color, int active_color, gfx_sprite_
     }
 }
 
+// Tab button setup helper - simplified wrapper
+void setup_tab_button(button_t *button, int x, int y, int width, int height, gfx_sprite_t *icon, bool active) {
+    int color = active ? 116 : 83;  // Selected vs inactive tab colors
+    int active_color = active ? 116 : 83;
+    setup_button(button, true, x, y, width, height, NULL, NULL, color, active_color, NULL, icon, 0, 0, 0, true, true, true, 0, 0);
+    button->active = active;
+}
+
 void customize_border(button_t *button, int weight, int color, int active_color) {
     button->border.weight = weight;
     button->border.color = color;
@@ -194,19 +202,7 @@ point_t find_center(int x, int y, int icon_x, int icon_y, int width, int height,
     point.y = y + (height - icon_height) / 2;
     return point;
 }
-
-// Helper functions for common button patterns
-void setup_tab_button(button_t *button, int x, int y, int width, int height, gfx_sprite_t *icon, bool active) {
-    setup_button(button, true, x, y, width, height, NULL, NULL, 83, active ? 116 : 83,
-                 NULL, icon, 2, 255, 255, true, true, true, 0, 0);
-    button->active = active;
-}
-
-void setup_chest_slot(button_t *button, int x, int y, int width, int height, void *function, void *args, gfx_sprite_t *icon) {
-    setup_button(button, false, x, y, width, height, function, args, 100, 100,
-                 NULL, icon, 1, 255, 171, true, true, false, 0, 10);
-}
-
+                                                                                                                                                                                             
 void setup_card_button(button_t *button, int x, int y, int width, int height, card_t *card) {
     int active_color = 100;
     if (card != NULL) {
@@ -592,8 +588,41 @@ void draw_inactive_tab(screen_t *current_screen, screen_t *other_screen, const c
 }
 
 void draw_elixir_overlay(screen_t *screen) {
-    (void)screen; // Suppress unused parameter warning
-    // Implementation for elixir bar drawing
+    if (screen == NULL || screen->data == NULL || screen->data->deck == NULL) return;
+
+    // Get the selected card index from the card grid (primary_selections[2])
+    int selected_card_index = screen->primary_selections[2].secondary_selection_index;
+
+    // Only show elixir if a card is selected
+    if (selected_card_index >= 0 && selected_card_index < 8) {
+        card_t *selected_card = &screen->data->deck[selected_card_index];
+        int elixir_cost = selected_card->elixir;
+
+        // Draw elixir bar background (purple/pink)
+        gfx_SetColor(55);  // Dark purple background
+        gfx_FillRectangle(175, 175, 100, 20);
+
+        // Draw filled portion based on elixir cost (max 10 elixir)
+        int filled_width = (elixir_cost * 100) / 10;
+        gfx_SetColor(202);  // Bright purple/pink for elixir
+        gfx_FillRectangle(175, 175, filled_width, 20);
+
+        // Draw border
+        gfx_SetColor(0);
+        gfx_Rectangle(175, 175, 100, 20);
+
+        // Draw elixir cost number
+        char elixir_str[4];
+        sprintf(elixir_str, "%d", elixir_cost);
+        gfx_SetTextFGColor(255);  // White text
+        gfx_PrintStringXY(elixir_str, 220, 178);
+    } else {
+        // No card selected - draw empty bar
+        gfx_SetColor(55);
+        gfx_FillRectangle(175, 175, 100, 20);
+        gfx_SetColor(0);
+        gfx_Rectangle(175, 175, 100, 20);
+    }
 }
 
 void draw_screen(screen_t *screen) {
@@ -914,9 +943,10 @@ void init_cursor(card_t *card, gfx_sprite_t *cursor) {
 }
 
 void init_projectile(card_t *card, gfx_sprite_t *sprite, unsigned int damage, unsigned int speed) {
-    card->projectile.sprite = sprite;
-    card->projectile.damage = damage;
-    card->projectile.speed = speed;
+    card->projectile_sprite = sprite;
+    card->projectile_speed = speed;
+    // damage is now stored directly in card->damage
+    (void)damage;
 }
 
 // Attack type, speed, damage, range (tiles)
@@ -934,15 +964,15 @@ void set_health(card_t *card, unsigned int health) {
 void init_deck(data_t *data) {
     const int SIZE_OF_DECK = 8;
     unsigned int movement_steps = 0;
-    
+
     // MEMORY OPTIMIZATION: Only allocate master card array - no more duplicates!
     card_t *available_cards = CR_MALLOC(sizeof(card_t) * TOTAL_CARDS);
-    
+
     // REMOVED: Duplicate card arrays that wasted ~3.2KB of memory
     // card_t *starter_cards = CR_MALLOC(sizeof(card_t) * SIZE_OF_DECK);
     // card_t *deck = CR_MALLOC(sizeof(card_t) * SIZE_OF_DECK);
 
-    init_card(&available_cards[0], miner_card, TROOP, LEGENDARY, GROUND_MOVEMENT, GROUND, true, 4);
+    init_card(&available_cards[0], miner_card, TROOP, LEGENDARY, GROUND_MOVEMENT, GROUND, true, 3);
     init_card(&available_cards[1], musketeer_card, TROOP, RARE, GROUND_MOVEMENT, GROUND, true, 4);
     init_card(&available_cards[2], balloon_card, TROOP, EPIC, AIR_MOVEMENT, GROUND, false, 5);
     init_card(&available_cards[3], giant_card, TROOP, LEGENDARY, GROUND_MOVEMENT, GROUND, true, 5);
@@ -981,26 +1011,26 @@ void init_deck(data_t *data) {
     miner_attack_cycle_rev[0] = miner_stepL_opp;
     miner_attack_cycle_rev[1] = miner_attack_opp;
 
-    // MEMORY OPTIMIZATION: Reduced Giant movement from 4 to 2 frames (like Miner pattern)
-    gfx_sprite_t **giant_movement = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    // giant_movement[0] = g_stepN;  // COMMENTED: Removed stepN to save memory
-    giant_movement[0] = g_stepL;     // Now index 0: Left step
-    // giant_movement[2] = g_stepN;  // COMMENTED: Was duplicate stepN frame
-    giant_movement[1] = g_stepR;     // Now index 1: Right step
+    // Giant movement with full 4 frames
+    gfx_sprite_t **giant_movement = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
+    giant_movement[0] = g_stepN;
+    giant_movement[1] = g_stepL;
+    giant_movement[2] = g_stepN;
+    giant_movement[3] = g_stepR;
 
-    gfx_sprite_t **giant_movement_rev = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    // giant_movement_rev[0] = g_stepN_opp;  // COMMENTED: Removed stepN to save memory
-    giant_movement_rev[0] = g_stepL_opp;     // Now index 0: Left step (opponent)
-    // giant_movement_rev[2] = g_stepN_opp;  // COMMENTED: Was duplicate stepN frame
-    giant_movement_rev[1] = g_stepR_opp;     // Now index 1: Right step (opponent)
+    gfx_sprite_t **giant_movement_rev = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
+    giant_movement_rev[0] = g_stepN_opp;
+    giant_movement_rev[1] = g_stepL_opp;
+    giant_movement_rev[2] = g_stepN_opp;
+    giant_movement_rev[3] = g_stepR_opp;
 
     gfx_sprite_t **giant_attack_cycle = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
     giant_attack_cycle[0] = g_attack;
-    giant_attack_cycle[1] = g_stepL;  // CHANGED: Use stepL instead of removed stepN
+    giant_attack_cycle[1] = g_stepN;
 
     gfx_sprite_t **giant_attack_cycle_rev = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
     giant_attack_cycle_rev[0] = g_attack_opp;
-    giant_attack_cycle_rev[1] = g_stepL_opp;  // CHANGED: Use stepL instead of removed stepN
+    giant_attack_cycle_rev[1] = g_stepN_opp;
 
     gfx_sprite_t **balloon_movement = CR_MALLOC(sizeof(gfx_sprite_t *));
     balloon_movement[0] = balloon;
@@ -1016,37 +1046,39 @@ void init_deck(data_t *data) {
     balloon_attack_rev[0] = balloon;
     balloon_attack_rev[1] = balloon;
 
-    // MEMORY OPTIMIZATION: Reduced Knight movement from 4 to 2 frames (like Miner pattern)
-    gfx_sprite_t **knight_movement = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    knight_movement[0] = knight_stepL;     // Now index 0: Left step
-    // knight_movement[1] = knight_stepN;  // COMMENTED: Removed stepN to save memory  
-    knight_movement[1] = knight_stepR;     // Now index 1: Right step
-    // knight_movement[3] = knight_stepN;  // COMMENTED: Was duplicate stepN frame
+    // Knight movement with full 4 frames
+    gfx_sprite_t **knight_movement = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
+    knight_movement[0] = knight_stepN;
+    knight_movement[1] = knight_stepL;
+    knight_movement[2] = knight_stepN;
+    knight_movement[3] = knight_stepR;
 
-    gfx_sprite_t **knight_movement_rev = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    knight_movement_rev[0] = knight_stepL_opp;     // Now index 0: Left step (opponent)
-    // knight_movement_rev[1] = knight_stepN_opp;  // COMMENTED: Removed stepN to save memory
-    knight_movement_rev[1] = knight_stepR_opp;     // Now index 1: Right step (opponent)
-    // knight_movement_rev[3] = knight_stepN_opp;  // COMMENTED: Was duplicate stepN frame
+    gfx_sprite_t **knight_movement_rev = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
+    knight_movement_rev[0] = knight_stepN_opp;
+    knight_movement_rev[1] = knight_stepL_opp;
+    knight_movement_rev[2] = knight_stepN_opp;
+    knight_movement_rev[3] = knight_stepR_opp;
 
     gfx_sprite_t **knight_attack_cycle = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
     knight_attack_cycle[0] = knight_attack;
-    knight_attack_cycle[1] = knight_stepL;  // CHANGED: Use stepL instead of removed stepN
+    knight_attack_cycle[1] = knight_stepN;
 
     gfx_sprite_t **knight_attack_cycle_rev = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
     knight_attack_cycle_rev[0] = knight_attack_opp;
-    knight_attack_cycle_rev[1] = knight_stepL_opp;  // CHANGED: Use stepL instead of removed stepN
+    knight_attack_cycle_rev[1] = knight_stepN_opp;
 
-    // Musketeer movement and attack cycle
+    // Musketeer movement with full 4 frames
     gfx_sprite_t **musketeer_movement = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
-    musketeer_movement[0] = musketeer_stepL;
-    musketeer_movement[1] = musketeer_stepN;
-    musketeer_movement[2] = musketeer_stepR;
-    musketeer_movement[3] = musketeer_stepN;
+    musketeer_movement[0] = musketeer_stepN;
+    musketeer_movement[1] = musketeer_stepL;
+    musketeer_movement[2] = musketeer_stepN;
+    musketeer_movement[3] = musketeer_stepR;
 
-    gfx_sprite_t **musketeer_movement_rev = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
+    gfx_sprite_t **musketeer_movement_rev = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
     musketeer_movement_rev[0] = musketeer_stepL_opp;
-    musketeer_movement_rev[1] = musketeer_stepR_opp;
+    musketeer_movement_rev[1] = musketeer_stepN;
+    musketeer_movement_rev[2] = musketeer_stepR_opp;
+    musketeer_movement_rev[3] = musketeer_stepN;
 
     gfx_sprite_t **musketeer_attack_cycle = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
     musketeer_attack_cycle[0] = musketeer_attack;
@@ -1060,8 +1092,8 @@ void init_deck(data_t *data) {
     init_troop(&available_cards[0], miner_movement, miner_movement_rev, miner_attack_cycle, miner_attack_cycle_rev, 2, 2);
     init_troop(&available_cards[1], musketeer_movement, musketeer_movement_rev, musketeer_attack_cycle, musketeer_attack_cycle_rev, 4, 2);
     init_troop(&available_cards[2], balloon_movement, balloon_movement_rev, balloon_attack, balloon_attack_rev, 1, 1);
-    init_troop(&available_cards[3], giant_movement, giant_movement_rev, giant_attack_cycle, giant_attack_cycle_rev, 2, 2);  // CHANGED: 4->2 movement steps
-    init_troop(&available_cards[7], knight_movement, knight_movement_rev, knight_attack_cycle, knight_attack_cycle_rev, 2, 2);  // CHANGED: 4->2 movement steps
+    init_troop(&available_cards[3], giant_movement, giant_movement_rev, giant_attack_cycle, giant_attack_cycle_rev, 4, 2);
+    init_troop(&available_cards[7], knight_movement, knight_movement_rev, knight_attack_cycle, knight_attack_cycle_rev, 4, 2);
 
     // Attack type, speed, damage, range (tiles)
     set_attack_vars(&available_cards[0], MELEE, 1, 50, 1);
@@ -1069,14 +1101,14 @@ void init_deck(data_t *data) {
     set_attack_vars(&available_cards[2], MELEE, 1, 100, 0.5);
     set_attack_vars(&available_cards[2], MELEE, 1, 100, 1);
     set_attack_vars(&available_cards[7], MELEE, 1, 25, 0.5);
-    
+
     // set_attack_speed;
     // set_damage()
 
     double radius = 2;
     unsigned int duration = 10;
     unsigned int color = 150;
-    
+
     // damage at the end
     // need tick speed to distribute ticks
     init_spell(&available_cards[4], 0.5, duration, color, 50, 1);
@@ -1094,7 +1126,7 @@ void init_deck(data_t *data) {
     init_building(&available_cards[6], elixir_collector, 0, 10, 1);
     // init_spell()
     // init_cursor(&available_cards[0])
-    
+
     // if null assume radius
     // assign_cards(available_cards, starter_cards, TOTAL_CARDS, SIZE_OF_DECK);
 
@@ -1108,7 +1140,7 @@ void init_deck(data_t *data) {
     // MEMORY OPTIMIZATION: Only store master card array
     data->available_cards = available_cards;
     data->unlocked_cards = NULL;  // REMOVED: No longer needed - save memory
-    data->deck = available_cards;  // Deck now points to same array    
+    data->deck = available_cards;  // Deck now points to same array
 }
 
 void cleanup_and_exit(screen_t *screens) {

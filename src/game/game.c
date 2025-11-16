@@ -17,6 +17,7 @@
 #include "memory_simple.h"
 #include "cards.h"
 #include "projectiles.h"
+#include "pathfinding.h"
 #include "../ui/menu.h"
 #include "/gfx/gfx.h"
 #include "player.h"
@@ -31,7 +32,9 @@
 #define TILE_SIZE 10
 #define NUM_TOWERS 3
 #define BOUNDARY_WIDTH 4
-#define RIVER_X (TILE_SIZE * 18)
+
+// Export RIVER_X for pathfinding.c
+const int RIVER_X = (TILE_SIZE * 18);
 
 int num_projectiles = 0;
 
@@ -582,16 +585,25 @@ void place_card(player_t *player, card_t *card, cursor_t cursor, void **list) {
         troop->position = position;
         troop->range = card->radius;
         troop->damage = card->damage;
-        troop->projectile = card->projectile;
+        troop->projectile_sprite = card->projectile_sprite;
+        troop->projectile_speed = card->projectile_speed;
 
         // Transfer other relevant properties
         troop->target = card->target;
         troop->movement = card->movement;
         troop->TARGET_TROOPS = card->TARGET_TROOPS;
 
+        // Initialize target tracking
+        troop->nearest_tower = NULL;
+        troop->nearest_target = NULL;
+
+        // Initialize waypoint system
+        troop->path = NULL;
+        troop->current_waypoint = NULL;
+
         // You might want to set these based on the card or game logic
         troop->angle = 0; // or set based on player's side
-        troop->step_size = 3; // Increased from 1 to 3 for faster movement
+        troop->step_size = 2.0; // Fast, smooth movement (moves every tick now!)
         troop->attack_speed = 100; // or set based on card properties
 
         // Add to the front of the list (troop's next points to current head)
@@ -657,7 +669,10 @@ void handle_keys(player_t *player) {
     card_t *card;
     int init_selected = player->deck->selected_card;
     int selected = init_selected;
-    int cursor_speed = 5;
+
+    // Static variables to track key hold time for acceleration
+    static int hold_ticks = 0;
+    static uint8_t last_key = 0;
 
     // Card selection (unchanged)
     if (kb_Data[6] & kb_Div) {
@@ -677,17 +692,56 @@ void handle_keys(player_t *player) {
         player->cursor.y = 100;
     }
 
-    // UPDATED: Cursor movement with bounds checking
+    // Cursor movement with acceleration
+    int cursor_speed = 3;  // Base speed
+    bool key_pressed = false;
+    uint8_t current_key = 0;
+
     if (kb_Data[7] & kb_Up) {
-        player->cursor.y -= cursor_speed;
+        current_key = kb_Up;
+        key_pressed = true;
+        if (current_key == last_key) hold_ticks++;
+        else hold_ticks = 0;
+
+        int speed = cursor_speed + (hold_ticks / 3);  // Accelerate every 3 ticks
+        if (speed > 15) speed = 15;  // Max speed
+        player->cursor.y -= speed;
     } else if (kb_Data[7] & kb_Down) {
-        player->cursor.y += cursor_speed;
+        current_key = kb_Down;
+        key_pressed = true;
+        if (current_key == last_key) hold_ticks++;
+        else hold_ticks = 0;
+
+        int speed = cursor_speed + (hold_ticks / 3);
+        if (speed > 15) speed = 15;
+        player->cursor.y += speed;
     }
 
     if (kb_Data[7] & kb_Right) {
-        player->cursor.x += cursor_speed;
+        current_key = kb_Right;
+        key_pressed = true;
+        if (current_key == last_key) hold_ticks++;
+        else hold_ticks = 0;
+
+        int speed = cursor_speed + (hold_ticks / 3);
+        if (speed > 15) speed = 15;
+        player->cursor.x += speed;
     } else if (kb_Data[7] & kb_Left) {
-        player->cursor.x -= cursor_speed;
+        current_key = kb_Left;
+        key_pressed = true;
+        if (current_key == last_key) hold_ticks++;
+        else hold_ticks = 0;
+
+        int speed = cursor_speed + (hold_ticks / 3);
+        if (speed > 15) speed = 15;
+        player->cursor.x -= speed;
+    }
+
+    if (!key_pressed) {
+        hold_ticks = 0;
+        last_key = 0;
+    } else {
+        last_key = current_key;
     }
 
     // NEW: Constrain cursor to valid bounds
@@ -963,45 +1017,6 @@ void* find_nearest_tower(tower_t *towers, position_t position) {
     return (void *) nearest_tower;
 }
 
-troop_t* find_nearest_troop(troop_t *troops, position_t source_position, target_type_t target_type) {
-    troop_t *nearest_troop = NULL;
-    double min_distance = INT_MAX;
-
-    troop_t *current_troop = troops;
-    while (current_troop != NULL) {
-        // Check if the current troop matches the target type
-        bool is_valid_target = false;
-        switch (target_type) {
-            case AIR:
-                is_valid_target = (current_troop->movement == AIR_MOVEMENT);
-                break;
-            case GROUND:
-                is_valid_target = (current_troop->movement == GROUND_MOVEMENT || current_troop->movement == STATIONARY);
-                break;
-            case ALL:
-                is_valid_target = true;
-                break;
-        }
-
-        if (is_valid_target) {
-            // Calculate distance
-            double dx = current_troop->position.x - source_position.x;
-            double dy = current_troop->position.y - source_position.y;
-            double distance = sqrt(dx*dx + dy*dy);
-
-            // Update nearest troop if this one is closer
-            if (distance < min_distance) {
-                min_distance = distance;
-                nearest_troop = current_troop;
-            }
-        }
-
-        current_troop = current_troop->next;
-    }
-
-    return nearest_troop;
-}
-
 bool in_range(position_t position, double range, position_t target_position) {
     double dx = target_position.x - position.x;
     double dy = target_position.y - position.y;
@@ -1024,17 +1039,19 @@ void update_troops(game_t *game) {
                 // Remove troop
                 troop_t *to_remove = current_troop;
                 current_troop = current_troop->next;
-                
+
                 if (prev_troop == NULL) {
                     players[i]->troops = current_troop;
                 } else {
                     prev_troop->next = current_troop;
                 }
-                
+
                 if (current_troop != NULL) {
                     current_troop->prev = prev_troop;
                 }
 
+                // Clean up waypoints before freeing troop
+                clear_waypoints(to_remove);
                 CR_FREE(to_remove);
                 continue;
             }
@@ -1078,13 +1095,13 @@ void update_troops(game_t *game) {
                         apply_damage(target, target_type, current_troop->damage);
                     } else if (current_troop->attack_type == RANGED) {
                        projectile_t *new_projectile = CR_MALLOC(sizeof(projectile_t));
-           
+
                         *new_projectile = (projectile_t) {
-                            .sprite = current_troop->projectile.sprite,
+                            .sprite = current_troop->projectile_sprite,
                             .position = current_troop->position,
                             .target_type = target_type,
                             .damage = current_troop->damage,
-                            .speed = current_troop->projectile.speed,
+                            .speed = current_troop->projectile_speed,
                             .target = target,
                             .next = NULL,
                             .prev = NULL
@@ -1116,32 +1133,18 @@ void update_troops(game_t *game) {
                 // Reset movement ticks when switching to attack mode
                 current_troop->movement_ticks = 0;
             } else {
-                // Movement logic
+                // Movement logic with pathfinding - SMOOTH: Move every tick!
+                // Use new pathfinding system
+                move_troop_with_pathfinding(current_troop, players[i], opponent);
+
+                // Update movement sprite animation (slower than movement)
                 current_troop->movement_ticks++;
                 if (current_troop->movement_ticks >= current_troop->movement_update_rate) {
                     current_troop->movement_ticks = 0;
-
-                    // Ensure we have a target tower
-                    if (current_troop->nearest_tower == NULL) {
-                        current_troop->nearest_tower = find_nearest_tower(opponent->towers, current_troop->position);
-                    }
-
-                    tower_t *nearest_tower = (tower_t *)current_troop->nearest_tower;
-                    if (nearest_tower != NULL) {
-                        // Move towards the tower
-                        double dx = nearest_tower->position.x - current_troop->position.x;
-                        double dy = nearest_tower->position.y - current_troop->position.y;
-                        current_troop->angle = atan2(dy, dx);
-
-                        current_troop->position.x += current_troop->step_size * cos(current_troop->angle);
-                        current_troop->position.y += current_troop->step_size * sin(current_troop->angle);
-
-                        // Update movement sprite
-                        current_troop->movement_frame = (current_troop->movement_frame + 1) % current_troop->movement_steps;
-                        current_troop->sprite = is_opponent[i] ? 
-                            current_troop->backward_movement[current_troop->movement_frame] : 
-                            current_troop->forward_movement[current_troop->movement_frame];
-                    }
+                    current_troop->movement_frame = (current_troop->movement_frame + 1) % current_troop->movement_steps;
+                    current_troop->sprite = is_opponent[i] ?
+                        current_troop->backward_movement[current_troop->movement_frame] :
+                        current_troop->forward_movement[current_troop->movement_frame];
                 }
 
                 // Reset attack ticks when switching to movement mode
@@ -1517,21 +1520,20 @@ void run_game(game_t *game) {
         // COMMENTED OUT: Complex game logic - rebuild incrementally
         update_elixir(game);
         update_towers(game);
-        // update_troops(game);
-        // update_buildings(game);
-        // update_spells(game);
+        update_troops(game);
+        update_buildings(game);
+        update_spells(game);
         // update_projectiles(game);
 
         // SIMPLIFIED: Just draw background and deck
         gfx_FillScreen(80);
 
-        // COMMENTED OUT: Complex rendering - rebuild incrementally
         // draw_tiles();
         draw_map(game);
         draw_troops(game);
-        // draw_buildings(game);
-        // draw_spells(game);
-        // draw_projectiles(game);
+        draw_buildings(game);
+        draw_spells(game);
+        draw_projectiles(game);
 
         // COMMENTED OUT: Debug toggle
         // if (kb_Data[4] & kb_Stat) debug = !debug;
