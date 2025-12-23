@@ -97,6 +97,18 @@ typedef struct {
 
 void start_menu(void);
 
+// Chest functions
+bool award_chest(data_t *data, chest_rarity_t rarity);
+void update_chest_timers(data_t *data, unsigned int delta_seconds);
+unsigned int get_chest_unlock_remaining(chest_t *chest);
+void format_chest_time(unsigned int seconds, char *buffer, int buffer_size);
+unsigned int get_chest_unlock_duration(chest_rarity_t rarity);
+
+// Rotated number drawing functions (defined in main.c)
+int countDigits(int num);
+void drawRotatedIntXY(int num, int x, int y);
+void drawChestTimer(chest_t *chest, int x, int y);
+
 #ifdef __cplusplus
 }
 #endif

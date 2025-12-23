@@ -6,6 +6,15 @@
 // Global data variable definition
 data_t data = {0};
 
+gfx_sprite_t *get_chest_sprite(chest_rarity_t rarity) {
+    switch (rarity) {
+        case SILVER: return silver_chest;
+        case GOLD: return gold_chest;
+        case MAGICAL: return magical_chest;
+        default: return silver_chest;
+    }
+}
+
 void init_data_defaults(data_t *data) {
     data->games_played = 0;
     data->games_won = 0;
@@ -26,6 +35,8 @@ void init_data_defaults(data_t *data) {
         data->chests[i].gold = 0;
         data->chests[i].total_cards = 0;
         data->chests[i].unlock_step = 0;
+        data->chests[i].time_elapsed = 0;
+        data->chests[i].duration = 0;
         data->chests[i].sprite = silver_chest;
     }
 }
@@ -55,6 +66,16 @@ void create_save(void) {
         save.deck_order[i] = data.deck_order[i];
     }
 
+    // Save chest data
+    for (int i = 0; i < 4; i++) {
+        save.chests[i].rarity = data.chests[i].rarity;
+        save.chests[i].status = data.chests[i].status;
+        save.chests[i].gold = data.chests[i].gold;
+        save.chests[i].total_cards = data.chests[i].total_cards;
+        save.chests[i].time_elapsed = data.chests[i].time_elapsed;
+        save.chests[i].duration = data.chests[i].duration;
+    }
+
     ti_var_t slot;
     if ((slot = ti_Open("CRDATA", "w+"))) {
         ti_Write(&save, sizeof(save_data_t), 1, slot);
@@ -80,15 +101,17 @@ void load_data(void) {
             data.deck_order[i] = save.deck_order[i];
         }
 
-        // Initialize runtime data (chests, etc.)
+        // Load chest data from save
         data.chests = CR_MALLOC(sizeof(chest_t) * 4);
         for (int i = 0; i < 4; i++) {
-            data.chests[i].status = EMPTY;
-            data.chests[i].rarity = SILVER;
-            data.chests[i].gold = 0;
-            data.chests[i].total_cards = 0;
+            data.chests[i].rarity = save.chests[i].rarity;
+            data.chests[i].status = save.chests[i].status;
+            data.chests[i].gold = save.chests[i].gold;
+            data.chests[i].total_cards = save.chests[i].total_cards;
+            data.chests[i].time_elapsed = save.chests[i].time_elapsed;
+            data.chests[i].duration = save.chests[i].duration;
             data.chests[i].unlock_step = 0;
-            data.chests[i].sprite = silver_chest;
+            data.chests[i].sprite = get_chest_sprite(save.chests[i].rarity);
         }
     } else {
         // File doesn't exist, create defaults
@@ -107,6 +130,16 @@ void save_data(void) {
     save.time_played = data.time_played;
     for (int i = 0; i < 8; i++) {
         save.deck_order[i] = data.deck_order[i];
+    }
+
+    // Save chest data
+    for (int i = 0; i < 4; i++) {
+        save.chests[i].rarity = data.chests[i].rarity;
+        save.chests[i].status = data.chests[i].status;
+        save.chests[i].gold = data.chests[i].gold;
+        save.chests[i].total_cards = data.chests[i].total_cards;
+        save.chests[i].time_elapsed = data.chests[i].time_elapsed;
+        save.chests[i].duration = data.chests[i].duration;
     }
 
     ti_var_t slot;

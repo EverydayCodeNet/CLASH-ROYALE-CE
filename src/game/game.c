@@ -104,6 +104,7 @@ void constrain_cursor_to_bounds(player_t *player, card_t *selected_card) {
     bounds_t *bounds = player->bounds;
 
     // Constrain to current placement bounds
+    // Cursor is top-left of sprite; boundary marks where left edge of sprite can go
     cursor->x = MAX(bounds->points[0].x, MIN(cursor->x, bounds->points[1].x));
     cursor->y = MAX(bounds->points[0].y, MIN(cursor->y, bounds->points[3].y));
 }
@@ -120,7 +121,7 @@ bool is_position_valid(player_t *player, cursor_t cursor, card_t *card) {
     int x = cursor.x;
     int y = cursor.y;
 
-    // Point-in-polygon test for rectangular bounds
+    // Boundary marks where left edge of sprite can go
     return (x >= bounds->points[0].x && x <= bounds->points[1].x &&
             y >= bounds->points[0].y && y <= bounds->points[3].y);
 }
@@ -469,7 +470,7 @@ void draw_card_carousel(player_t *player) {
     const int CARD_HEIGHT = 40;
 
     gfx_SetColor(56);
-    gfx_FillRectangle(10,60,70,180);
+    gfx_FillRectangle(0,60,70,180);
 
     int y = 0;
     const int NUM_AVAILABLE = 4;
@@ -583,6 +584,8 @@ void place_card(player_t *player, card_t *card, cursor_t cursor, void **list) {
         troop->attack_steps = card->attack_steps;
         troop->attack_speed = card->attack_speed;
         troop->position = position;
+        troop->anchor_x = card->anchor_x;
+        troop->anchor_y = card->anchor_y;
         troop->range = card->radius;
         troop->damage = card->damage;
         troop->projectile_sprite = card->projectile_sprite;
@@ -1332,7 +1335,7 @@ bool check_win(game_t *game) {
         return true;
     }
 
-    // return true if 3 towers are destroyeds
+    // return true if 3 towers are destroyed
     return false;
 }
 
@@ -1533,7 +1536,7 @@ void run_game(game_t *game) {
         draw_troops(game);
         draw_buildings(game);
         draw_spells(game);
-        draw_projectiles(game);
+        // draw_projectiles(game);
 
         // COMMENTED OUT: Debug toggle
         // if (kb_Data[4] & kb_Stat) debug = !debug;
@@ -1577,6 +1580,79 @@ void run_game(game_t *game) {
     // free_game(game);
 }
 
+// Calculate game result based on crowns and towers destroyed
+game_result_t calculate_game_result(game_t *game) {
+    game_result_t result = {0};
+
+    result.player_crowns = game->player->crowns;
+    result.opponent_crowns = game->opponent->crowns;
+
+    // Determine victory: more crowns or destroyed king tower (3 crowns)
+    if (result.player_crowns > result.opponent_crowns) {
+        result.victory = true;
+    } else if (result.player_crowns < result.opponent_crowns) {
+        result.victory = false;
+    } else {
+        // Tie - check towers destroyed
+        result.victory = (game->player->towers_destroyed > game->opponent->towers_destroyed);
+    }
+
+    // Calculate trophy change based on crowns
+    if (result.victory) {
+        // Win: +20 base, +5 per crown
+        result.trophy_change = 20 + (result.player_crowns * 5);
+    } else {
+        // Loss: -10 base, -5 per opponent crown (minimum -25)
+        result.trophy_change = -10 - (result.opponent_crowns * 5);
+        if (result.trophy_change < -25) result.trophy_change = -25;
+    }
+
+    // Award chest on victory (random rarity based on crowns)
+    result.chest_given = false;
+    if (result.victory) {
+        // Higher crowns = better chance for better chest
+        int roll = rand() % 100;
+        if (result.player_crowns >= 3 && roll < 20) {
+            result.chest_awarded = MAGICAL;
+        } else if (result.player_crowns >= 2 && roll < 50) {
+            result.chest_awarded = GOLD;
+        } else {
+            result.chest_awarded = SILVER;
+        }
+        result.chest_given = true;
+    }
+
+    return result;
+}
+
+// Apply game result to persistent data
+void apply_game_result(data_t *data, game_result_t *result) {
+    // Update games played/won
+    data->games_played++;
+    if (result->victory) {
+        data->games_won++;
+    }
+
+    // Update trophies (don't go below 0)
+    int new_trophies = (int)data->trophies + result->trophy_change;
+    if (new_trophies < 0) new_trophies = 0;
+    data->trophies = (unsigned int)new_trophies;
+
+    // Award chest if victory
+    if (result->chest_given) {
+        award_chest(data, result->chest_awarded);
+    }
+
+    // Store result for display on battle_results screen
+    data->has_pending_result = true;
+    data->last_victory = result->victory;
+    data->last_player_crowns = result->player_crowns;
+    data->last_opponent_crowns = result->opponent_crowns;
+    data->last_trophy_change = result->trophy_change;
+    data->last_chest_awarded = result->chest_awarded;
+    data->last_chest_given = result->chest_given;
+}
+
 void start_game(void *args) {
 
     screen_t *screen = (screen_t *) args;
@@ -1584,9 +1660,25 @@ void start_game(void *args) {
     screen->active = false;
     game_t *game = init_game(screen->data);
     run_game(game);
-    // Draw end screen
-    // Restore home screen when the game is done
-    // Update game data
+
+    // Calculate and apply game results
+    game_result_t result = calculate_game_result(game);
+    apply_game_result(screen->data, &result);
+
+    // Navigate to battle_results screen
+    screen_t *results_screen = screen;
+    while (results_screen != NULL && strcmp(results_screen->name, "battle_results") != 0) {
+        results_screen = results_screen->next;
+    }
+
+    if (results_screen != NULL) {
+        // Show results screen instead of main
+        results_screen->active = true;
+        results_screen->selection_index = 1;  // Start on continue button
+    } else {
+        // Fallback: return to main screen
+        screen->active = true;
+    }
+
     // free_game(game)
-    screen->active = true;
 }

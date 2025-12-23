@@ -265,16 +265,23 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
 
     // GROUND TROOPS: Must use bridges to cross river
     if (troop->movement == GROUND_MOVEMENT) {
-        // Check if we need to cross the river
-        if (needs_to_cross_river(troop->position, target_pos)) {
-            // Check if we're already on a bridge
-            if (!is_on_bridge(troop->position)) {
-                // Not on bridge, need to navigate to one
-                bridge_t *bridge = select_nearest_bridge(troop->position, target_pos);
+        // Calculate anchor position (where the feet are)
+        position_t anchor_pos = {
+            troop->position.x + troop->anchor_x,
+            troop->position.y + ( troop->anchor_y)
+        };
 
-                // Move toward the bridge center
-                double dx = bridge->center.x - troop->position.x;
-                double dy = bridge->center.y - troop->position.y;
+        // Check if we need to cross the river (using anchor position)
+        if (needs_to_cross_river(anchor_pos, target_pos)) {
+            if (!is_on_bridge(anchor_pos)) {
+                // Not on bridge, need to navigate to one
+                bridge_t *bridge = select_nearest_bridge(anchor_pos, target_pos);
+
+                // Move toward the bridge top-left (same logic as towers)
+                double bridge_target_x = bridge->center.x;
+                double bridge_target_y = bridge->center.y;
+                double dx = bridge_target_x - troop->position.x;
+                double dy = bridge_target_y - troop->position.y;
                 troop->angle = atan2(dy, dx);
 
                 troop->position.x += troop->step_size * cos(troop->angle);

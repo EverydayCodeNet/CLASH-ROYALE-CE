@@ -95,6 +95,10 @@ typedef struct {
     
     bool TARGET_TROOPS;
 
+    // Anchor point for sprite positioning (feet/center of mass)
+    int anchor_x;
+    int anchor_y;
+
     // enum for card type (troop, spell, building)?
     // store troop movement, etc. in here or not?
     // Maybe have the card type here determine the troop spawned in
@@ -171,6 +175,10 @@ typedef struct{
     // gfx_sprite_t **projectile_sprites;
 
     position_t position;
+
+    // Anchor point - where the "feet" are relative to sprite top-left
+    int anchor_x;
+    int anchor_y;
 
     // Projectile template (only sprite and speed needed)
     gfx_sprite_t *projectile_sprite;
@@ -309,8 +317,8 @@ typedef struct {
 
 typedef struct {
     unsigned int time_remaining;
-    
-    // Alternative structures (towers, troops, spells, etc.) are stored under player struct 
+
+    // Alternative structures (towers, troops, spells, etc.) are stored under player struct
     player_t *player;
     player_t *opponent;
 
@@ -318,7 +326,7 @@ typedef struct {
     timer_t timer;
 
     bool debug;
-    // need a player instance that stores deck and local instance that has elixir, deck orders, game stats 
+    // need a player instance that stores deck and local instance that has elixir, deck orders, game stats
     // Player *player;
 
     // // player name
@@ -327,6 +335,15 @@ typedef struct {
 
     // // arena, decks, card levels, chests, experience
 } game_t;
+
+typedef struct {
+    bool victory;
+    unsigned int player_crowns;
+    unsigned int opponent_crowns;
+    int trophy_change;  // Can be negative for loss
+    chest_rarity_t chest_awarded;
+    bool chest_given;
+} game_result_t;
 
 #ifdef __cplusplus
 }

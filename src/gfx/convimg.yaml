@@ -152,6 +152,15 @@ converts:
       - cards/troops/balloon/balloon_opp.png
       - cards/buildings/elixir_collector/elixir_collector.png
 
+  # Group 7: Number sprites for rotated text display
+  - name: number_sprites
+    palette: global_palette
+    transparent-color-index: 170
+    images:
+      - numbers/minute.png
+      - numbers/second.png
+      - ui/digits.png
+
 outputs:
   # Generate C header files for all sprite declarations
   - type: c
@@ -165,3 +174,4 @@ outputs:
       - troop_sprites1
       - troop_sprites2
       - troop_sprites3
+      - number_sprites

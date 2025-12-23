@@ -3,6 +3,7 @@
 #include <fileioc.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "ui/menu.h"
 #include "gfx/gfx.h"
@@ -20,6 +21,57 @@ void free_game(game_t *game);
 void load_data(void);
 void free_data(data_t *data);
 void start_menu(void);
+
+// Digit sprite constants (digits sprite: 100 pixels wide, 10 pixels per digit)
+#define DIGIT_WIDTH 10
+
+int countDigits(int num) {
+    int count = 0;
+    do {
+        num /= 10;
+        count++;
+    } while (num != 0);
+    return count;
+}
+
+// Draw a single digit (0-9) at position (x, y) using the digits sprite sheet
+// Uses clipping to draw only the portion of the sprite we need - no buffer allocation
+void drawDigit(int digit, int x, int y) {
+    // Set clip region to only show where we want the digit drawn
+    gfx_SetClipRegion(x, y, x + DIGIT_WIDTH, y + digits_height);
+
+    // Draw the full sprite offset so the correct digit lands in the clip region
+    gfx_TransparentSprite(digits, x - (digit * DIGIT_WIDTH), y);
+
+    // Reset clip region to full screen
+    gfx_SetClipRegion(0, 0, 320, 240);
+}
+
+void drawRotatedIntXY(int num, int x, int y) {
+    int padding = 8;
+
+    // Handle zero specially
+    if (num == 0) {
+        drawDigit(0, x, y);
+        return;
+    }
+
+    // Count digits
+    int temp = num;
+    int numDigits = 0;
+    while (temp > 0) {
+        numDigits++;
+        temp /= 10;
+    }
+
+    // Draw each digit from least significant to most significant
+    for (int i = 0; i < numDigits; i++) {
+        int currentNum = num % 10;
+        int drawY = y + padding * (numDigits - 1 - i);
+        drawDigit(currentNum, x, drawY);
+        num /= 10;
+    }
+}
 
 char *current_screen = "loading";
 
@@ -84,6 +136,8 @@ void draw_main_screen(void) {
 
     // Draw coin count
     gfx_TransparentSprite(gold_coin, 285, 80);
+    drawRotatedIntXY(10, 285, 80);
+    drawDigit(5, 100, 100);
 
     // Handle tab navigation
     if (selected_row == 0 && (kb_Data[7] & kb_Up)) {
@@ -283,22 +337,47 @@ void draw_gameover(void) {
 
     gfx_FillScreen(80);
 
+    // Draw victory/defeat text
+    // gfx_SetTextFGColor(255);
+    // if (data.has_pending_result) {
+    //     if (data.last_victory) {
+    //         gfx_PrintStringXY("VICTORY!", 130, 10);
+    //     } else {
+    //         gfx_PrintStringXY("DEFEAT", 135, 10);
+    //     }
+    // }
+
     // Draw crown count (0-3 crowns earned)
     // Left side - Player crowns
-    gfx_RotatedScaledTransparentSprite(empty_crown, 180, 60, 0, 128);
-    gfx_RotatedScaledTransparentSprite(empty_crown, 180, 100, 0, 128);
-    gfx_RotatedScaledTransparentSprite(empty_crown, 180, 140, 0, 128);
+    // for (unsigned int i = 0; i < 3; i++) {
+    //     gfx_sprite_t *crown_sprite = (i < data.last_player_crowns) ? blue_crown : empty_crown;
+    //     gfx_RotatedScaledTransparentSprite(crown_sprite, 180, 60 + (i * 40), 0, 128);
+    // }
 
-    // Right side crowns - opponent
-    gfx_RotatedScaledTransparentSprite(empty_crown, 250, 60, 0, 128);
-    gfx_RotatedScaledTransparentSprite(empty_crown, 250, 100, 0, 128);
-    gfx_RotatedScaledTransparentSprite(empty_crown, 250, 140, 0, 128);
+    // // // Right side crowns - opponent
+    // for (unsigned int i = 0; i < 3; i++) {
+    //     gfx_sprite_t *crown_sprite = (i < data.last_opponent_crowns) ? red_crown : empty_crown;
+    //     gfx_RotatedScaledTransparentSprite(crown_sprite, 250, 60 + (i * 40), 0, 128);
+    // }
 
     // Draw trophy reward/loss
     gfx_TransparentSprite(trophy, 122, 125);
+    gfx_SetTextFGColor(255);
+    // if (data.last_trophy_change >= 0) {
+    //     gfx_PrintStringXY("+", 140, 125);
+    //     drawRotatedIntXY(data.last_trophy_change, 140, 133);
+    // } else {
+    //     // Use "|" for minus sign since screen is rotated
+    //     gfx_PrintStringXY("|", 140, 125);
+    //     drawRotatedIntXY(-data.last_trophy_change, 140, 133);
+    // }
 
     // Draw chest reward (if won)
-    gfx_TransparentSprite(silver_chest, 110, 45);
+    if (data.last_chest_given) {
+        gfx_sprite_t *chest_sprite = get_chest_sprite(data.last_chest_awarded);
+        gfx_TransparentSprite(chest_sprite, 110, 45);
+    }
+    // gfx_TransparentSprite(silver_chest, 110, 45);
 
     // Draw continue button
     gfx_TransparentSprite(play_again, 30, 15);
@@ -330,7 +409,10 @@ void draw_gameover(void) {
     if (kb_Data[6] & kb_Enter) {
         delay(150);
         if (selected_button == 0) current_screen = "game";
-        if (selected_button == 1) current_screen = "main";
+        if (selected_button == 1) {
+            data.has_pending_result = false;
+            current_screen = "main";
+        }
     }
 }
 
@@ -340,6 +422,11 @@ void draw_game(void) {
 
     if (game) {
         run_game(game);
+
+        // Calculate and apply game results
+        game_result_t result = calculate_game_result(game);
+        apply_game_result(&data, &result);
+
         free_game(game);
     }
 

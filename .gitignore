@@ -14,3 +14,4 @@ src/gfx/*.h
 makefile
 /planning/
 .psd
+nul

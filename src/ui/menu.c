@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <graphx.h>
+#include <tice.h>
 #include <sys/rtc.h>
 #include <fileioc.h>
 #include <keypadc.h>
@@ -14,6 +15,7 @@
 #include "../game/game.h"
 #include "../game/structs.h"
 #include "../game/memory_simple.h"
+#include "../game/sprite_anchors.h"
 #include "menu.h"
 
 #define TOTAL_CARDS 8
@@ -122,6 +124,78 @@ bool can_unlock(chest_t *chests) {
 
 void unlock_chest(chest_t *chest) {
     chest->status = UNLOCKING;
+    chest->time_elapsed = 0;  // Reset timer when starting unlock
+}
+
+// Update chest unlock timers - call this each frame
+void update_chest_timers(data_t *data, unsigned int delta_seconds) {
+    if (data->chests == NULL) return;
+
+    for (int i = 0; i < 4; i++) {
+        chest_t *chest = &data->chests[i];
+        if (chest->status == UNLOCKING) {
+            chest->time_elapsed += delta_seconds;
+
+            // Check if unlock is complete
+            if (chest->time_elapsed >= chest->duration) {
+                chest->status = OPEN;
+                chest->time_elapsed = chest->duration;  // Cap at duration
+            }
+        }
+    }
+}
+
+// Get remaining unlock time in seconds
+unsigned int get_chest_unlock_remaining(chest_t *chest) {
+    if (chest->status != UNLOCKING) return 0;
+    if (chest->time_elapsed >= chest->duration) return 0;
+    return chest->duration - chest->time_elapsed;
+}
+
+// Format time as "Xh Ym" or "Xm Ys"
+void format_chest_time(unsigned int seconds, char *buffer, int buffer_size) {
+    if (seconds >= 3600) {
+        unsigned int hours = seconds / 3600;
+        unsigned int mins = (seconds % 3600) / 60;
+        sprintf(buffer, "%uh%um", hours, mins);
+    } else if (seconds >= 60) {
+        unsigned int mins = seconds / 60;
+        unsigned int secs = seconds % 60;
+        sprintf(buffer, "%um%us", mins, secs);
+    } else {
+        sprintf(buffer, "%us", seconds);
+    }
+}
+
+// Get unlock duration in seconds based on chest rarity
+unsigned int get_chest_unlock_duration(chest_rarity_t rarity) {
+    switch (rarity) {
+        case SILVER: return 60;      // 1 minute
+        case GOLD: return 120;       // 2 minutes
+        case MAGICAL: return 240;    // 4 minutes
+        default: return 60;
+    }
+}
+
+// Award a chest to a slot (call after winning a battle)
+bool award_chest(data_t *data, chest_rarity_t rarity) {
+    if (data->chests == NULL) return false;
+
+    // Find first empty slot
+    for (int i = 0; i < 4; i++) {
+        if (data->chests[i].status == EMPTY) {
+            data->chests[i].rarity = rarity;
+            data->chests[i].status = LOCKED;
+            data->chests[i].gold = (rarity == SILVER) ? 50 : (rarity == GOLD) ? 100 : 200;
+            data->chests[i].total_cards = (rarity == SILVER) ? 3 : (rarity == GOLD) ? 6 : 10;
+            data->chests[i].duration = get_chest_unlock_duration(rarity);
+            data->chests[i].time_elapsed = 0;
+            data->chests[i].unlock_step = 0;
+            data->chests[i].sprite = get_chest_sprite(rarity);
+            return true;
+        }
+    }
+    return false;  // No empty slots
 }
 
 void continue_chest_opening(void) {
@@ -231,6 +305,10 @@ screen_t *create_screen(const char *name, int num_primary_selections, data_t *da
     screen->next = NULL;
     set_selection_delay(screen, 150);
     return screen;
+}
+
+void setup_chest_slot(button_t *button, int x, int y, int width, int height, void *function, void *args, gfx_sprite_t *icon) {
+    setup_button(button, false, x, y, width, height, function, args, 100, 116, NULL, icon, 2, 255, 255, true, true, true, 0, 0);
 }
 
 void init_chest_slots(screen_t *screen, button_t *slots) {
@@ -379,6 +457,11 @@ screen_t *init_collection_screen(data_t *data) {
 
 void continue_from_results(void *args) {
     screen_t *screen = (screen_t *)args;
+    // Clear pending result flag
+    if (screen->data != NULL) {
+        screen->data->has_pending_result = false;
+    }
+
     // Return to main menu from battle results
     screen->active = false;
     screen_t *main_screen = screen;
@@ -549,6 +632,29 @@ void draw_icon(icon_t icon) {
     }
 }
 
+// Draw chest unlock timer (uses drawRotatedIntXY from main.c)
+void drawChestTimer(chest_t *chest, int x, int y) {
+    if (chest == NULL) return;
+    if (chest->status != UNLOCKING) return;
+
+    unsigned int remaining = get_chest_unlock_remaining(chest);
+    int digit_offset = 0;
+    int padding = 10;
+
+    if (remaining >= 60) {
+        // Show minutes
+        int minutes_val = remaining / 60;
+        drawRotatedIntXY(minutes_val, x, y);
+        digit_offset = padding * countDigits(minutes_val);
+        gfx_TransparentSprite(minute, x, y + digit_offset);
+    } else {
+        // Show seconds
+        drawRotatedIntXY(remaining, x, y);
+        digit_offset = padding * countDigits(remaining);
+        gfx_TransparentSprite(second, x, y + digit_offset);
+    }
+}
+
 void draw_button_border(button_t *button, bool selected) {
     (void)selected; // Suppress unused parameter warning
     if (button->border.weight <= 0) return;
@@ -651,16 +757,73 @@ void draw_screen(screen_t *screen) {
         gfx_PrintStringXY("<card name>", 85, 175);
     } else if (strcmp(screen->name, "battle_results") == 0) {
         // Draw results screen elements
-        gfx_SetColor(255);
-        gfx_PrintStringXY("VICTORY!", 120, 10);
+        gfx_SetTextFGColor(255);
+
+        // Show victory or defeat
+        if (screen->data->has_pending_result) {
+            if (screen->data->last_victory) {
+                gfx_PrintStringXY("VICTORY!", 130, 10);
+            } else {
+                gfx_PrintStringXY("DEFEAT", 135, 10);
+            }
+
+            // Show crowns with sprites
+            gfx_PrintStringXY("Crowns:", 110, 40);
+            // drawRotatedIntXY(screen->data->last_player_crowns, 110, 55);
+            gfx_PrintStringXY("-", 125, 55);
+            // drawRotatedIntXY(screen->data->last_opponent_crowns, 135, 55);
+
+            // Show trophy change with sprite and rotated number
+            gfx_TransparentSprite(trophy, 110, 80);
+            int trophy_change = screen->data->last_trophy_change;
+            if (trophy_change >= 0) {
+                gfx_PrintStringXY("+", 125, 83);
+                // drawRotatedIntXY(trophy_change, 135, 83);
+            } else {
+                gfx_PrintStringXY("-", 125, 83);
+                // drawRotatedIntXY(-trophy_change, 135, 83);
+            }
+
+            // Show chest awarded (if any)
+            if (screen->data->last_chest_given) {
+                const char *chest_name = "Silver";
+                if (screen->data->last_chest_awarded == GOLD) chest_name = "Gold";
+                else if (screen->data->last_chest_awarded == MAGICAL) chest_name = "Magical";
+
+                char chest_str[30];
+                sprintf(chest_str, "%s Chest!", chest_name);
+                gfx_PrintStringXY(chest_str, 120, 120);
+
+                // Draw chest sprite
+                gfx_sprite_t *chest_sprite = get_chest_sprite(screen->data->last_chest_awarded);
+                gfx_TransparentSprite(chest_sprite, 145, 140);
+            }
+        }
+
         gfx_PrintStringXY("Continue", 130, 205);
     }
 
     // Draw screen-specific elements
     if (strcmp(screen->name, "main") == 0) {
-        // Draw XP/Level indicator
-        gfx_SetColor(255);
-        gfx_PrintStringXY("15/40", 280, 25);
+        // Draw trophy count with rotated number sprites
+        gfx_TransparentSprite(trophy, 145, 5);
+        // drawRotatedIntXY(screen->data->trophies, 145, 20);
+
+        // Draw gold count with rotated number sprites
+        gfx_TransparentSprite(gold_coin, 145, 60);
+        // drawRotatedIntXY(screen->data->gold, 145, 75);
+
+        // Draw chest timers for unlocking chests
+        // if (screen->data->chests != NULL) {
+        //     const int SLOT_HEIGHT = 45;
+        //     for (int i = 0; i < 4; i++) {
+        //         chest_t *chest = &screen->data->chests[i];
+        //         if (chest->status == UNLOCKING) {
+        //             int slot_y = 15 + (i * (10 + SLOT_HEIGHT));
+        //             drawChestTimer(chest, 120, slot_y + 5);
+        //         }
+        //     }
+        // }
     }
 
     // Draw active screen buttons
@@ -981,6 +1144,12 @@ void init_deck(data_t *data) {
     init_card(&available_cards[6], elixir_collector_card, BUILDING, RARE, STATIONARY, ALL, false, 6);
     init_card(&available_cards[7], knight_card, TROOP, COMMON, GROUND_MOVEMENT, GROUND, true, 3);
 
+    // Set sprite anchor points from lookup table
+    for (int i = 0; i < TOTAL_CARDS; i++) {
+        available_cards[i].anchor_x = SPRITE_ANCHORS[i].x;
+        available_cards[i].anchor_y = SPRITE_ANCHORS[i].y;
+    }
+
     init_cursor(&available_cards[0], miner_stepL);
     init_cursor(&available_cards[1], musketeer_stepL);
     init_cursor(&available_cards[2], balloon);
@@ -1153,24 +1322,45 @@ void cleanup_and_exit(screen_t *screens) {
 void start_menu(void) {
     bool exit = false;
     load_data();
-    
+
     init_deck(&data);
     screen_t *screens = init_screens();
-    
+
     gfx_SetDrawBuffer();
-    
+
+    // Track time for chest timers
+    uint8_t last_seconds, last_minutes, last_hours;
+    boot_GetTime(&last_seconds, &last_minutes, &last_hours);
+
     while (exit == false) {
         kb_Scan();
-        
+
+        // Calculate delta time for chest timers
+        uint8_t current_seconds, current_minutes, current_hours;
+        boot_GetTime(&current_seconds, &current_minutes, &current_hours);
+
+        unsigned int delta = 0;
+        if (current_seconds != last_seconds || current_minutes != last_minutes || current_hours != last_hours) {
+            delta = (current_hours - last_hours) * 3600 +
+                    (current_minutes - last_minutes) * 60 +
+                    (current_seconds - last_seconds);
+            last_seconds = current_seconds;
+            last_minutes = current_minutes;
+            last_hours = current_hours;
+
+            // Update chest unlock timers
+            update_chest_timers(&data, delta);
+        }
+
         // Get current active screen for this frame
         screen_t *active = get_active_screen(screens);
-        
+
         // Pass screens (head of list) instead of active screen
         handle_screens(screens);
         gfx_FillScreen(80);
-        
+
         draw_screen(active);
-        
+
         gfx_BlitBuffer();
 
         if (kb_Data[6] & kb_Clear) {
