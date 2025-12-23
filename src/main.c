@@ -38,10 +38,10 @@ int countDigits(int num) {
 // Uses clipping to draw only the portion of the sprite we need - no buffer allocation
 void drawDigit(int digit, int x, int y) {
     // Set clip region to only show where we want the digit drawn
-    gfx_SetClipRegion(x, y, x + DIGIT_WIDTH, y + digits_height);
+    gfx_SetClipRegion(x, y, x + DIGIT_WIDTH, y + digits_sprite_height);
 
     // Draw the full sprite offset so the correct digit lands in the clip region
-    gfx_TransparentSprite(digits, x - (digit * DIGIT_WIDTH), y);
+    gfx_TransparentSprite(digits_sprite, x - (digit * DIGIT_WIDTH), y);
 
     // Reset clip region to full screen
     gfx_SetClipRegion(0, 0, 320, 240);
@@ -109,7 +109,7 @@ void draw_loading_screen(void) {
 void draw_main_screen(void) {
     static int selected_chest = -1;
     static int selected_row = 0; 
-    const unsigned int MAX_ROW = 4;
+    const unsigned int MAX_ROW = 3;
     const unsigned int MAX_CHESTS = 4;
     // Do we need a variable for the tab we're working with?
     // Variable for checking whether to exit main screen and redirect to game handling
@@ -133,11 +133,11 @@ void draw_main_screen(void) {
 
     // Draw trophy count
     gfx_TransparentSprite(trophy, 285, 15);
+    drawRotatedIntXY(data.trophies, 287, 32);
 
     // Draw coin count
     gfx_TransparentSprite(gold_coin, 285, 80);
-    drawRotatedIntXY(10, 285, 80);
-    drawDigit(5, 100, 100);
+    drawRotatedIntXY(data.gold, 287, 100);
 
     // Handle tab navigation
     if (selected_row == 0 && (kb_Data[7] & kb_Up)) {
@@ -170,9 +170,45 @@ void draw_main_screen(void) {
     
     // Draw chest slots and chests
     for (int i = 0; i < MAX_CHESTS; i++) {
+        int slot_x = 75;
+        int slot_y = 15 + (55 * i);
+        int slot_width = 60;
+        int slot_height = 45;
+
+        // Draw slot border
         gfx_SetColor(255);
         if (i == selected_chest && selected_row == 1) gfx_SetColor(YELLOW);
-        gfx_Rectangle(75, 15 + (55 * i), 60, 45);
+        gfx_Rectangle(slot_x, slot_y, slot_width, slot_height);
+
+        // Draw chest sprite if slot is not empty
+        if (data.chests != NULL && data.chests[i].status != EMPTY) {
+            chest_t *chest = &data.chests[i];
+            gfx_sprite_t *chest_sprite = chest->sprite;
+            if (chest_sprite != NULL) {
+                // Center chest in slot
+                int chest_x = slot_x + 5; // + (slot_width - chest_sprite->width) / 2
+                int chest_y = slot_y + (slot_height - chest_sprite->height) / 2;
+                gfx_TransparentSprite(chest_sprite, chest_x, chest_y);
+            }
+
+            // Draw timer at all times, only update the clock when it is unlocking
+            if (chest->status != OPEN) {
+                unsigned int remaining = get_chest_unlock_remaining(chest);
+                int timer_x = slot_x + 45;
+                int timer_y = slot_y + 5;
+
+                if (remaining >= 60) {
+                    int minutes_val = remaining / 60;
+                    drawRotatedIntXY(minutes_val, timer_x, timer_y);
+                    int digit_offset = 8 * countDigits(minutes_val);
+                    gfx_TransparentSprite(minute, timer_x + 1, timer_y + digit_offset + 2);
+                } else {
+                    drawRotatedIntXY(remaining, timer_x, timer_y);
+                    int digit_offset = 8 * countDigits(remaining);
+                    gfx_TransparentSprite(second, timer_x + 1, timer_y + digit_offset + 2);
+                }
+            }
+        }
     }
     
     if ((kb_Data[7] & kb_Right) && selected_row < (int)MAX_ROW) {
@@ -363,14 +399,14 @@ void draw_gameover(void) {
     // Draw trophy reward/loss
     gfx_TransparentSprite(trophy, 122, 125);
     gfx_SetTextFGColor(255);
-    // if (data.last_trophy_change >= 0) {
-    //     gfx_PrintStringXY("+", 140, 125);
-    //     drawRotatedIntXY(data.last_trophy_change, 140, 133);
-    // } else {
-    //     // Use "|" for minus sign since screen is rotated
-    //     gfx_PrintStringXY("|", 140, 125);
-    //     drawRotatedIntXY(-data.last_trophy_change, 140, 133);
-    // }
+    if (data.last_trophy_change >= 0) {
+        gfx_PrintStringXY("+", 140, 125);
+        drawRotatedIntXY(data.last_trophy_change, 140, 133);
+    } else {
+        // Use "|" for minus sign since screen is rotated
+        gfx_PrintStringXY("|", 140, 125);
+        drawRotatedIntXY(-data.last_trophy_change, 140, 133);
+    }
 
     // Draw chest reward (if won)
     if (data.last_chest_given) {
@@ -463,6 +499,18 @@ void draw_screens(void) {
 
 int main(void) {
     srand(rtc_Time());
+
+    // Load sprites from appvars (must be called before gfx_Begin)
+    if (CRUI_init() == 0 ||
+        CRCARD_init() == 0 ||
+        CRMAP_init() == 0 ||
+        CRTRP1_init() == 0 ||
+        CRTRP2_init() == 0 ||
+        CRTRP3_init() == 0) {
+        // Failed to load an appvar - exit gracefully
+        return 1;
+    }
+
     gfx_Begin();
     gfx_SetPalette(global_palette, sizeof_global_palette, 0);
     gfx_SetTransparentColor(170);

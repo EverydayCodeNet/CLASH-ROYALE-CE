@@ -159,19 +159,55 @@ converts:
     images:
       - numbers/minute.png
       - numbers/second.png
-      - ui/digits.png
+      - ui/digits_sprite.png
 
 outputs:
-  # Generate C header files for all sprite declarations
+  # Palette must be compiled into program (not in appvar)
   - type: c
-    include-file: gfx.h
+    include-file: global_palette.h
     palettes:
       - global_palette
+
+  # Split sprites across multiple appvars to stay under 64KB each
+  - type: appvar
+    name: CRUI
+    include-file: gfx_ui.h
+    source-format: c
     converts:
       - ui_sprites
-      - card_sprites
-      - map_sprites
-      - troop_sprites1
-      - troop_sprites2
-      - troop_sprites3
       - number_sprites
+
+  - type: appvar
+    name: CRCARD
+    include-file: gfx_card.h
+    source-format: c
+    converts:
+      - card_sprites
+
+  - type: appvar
+    name: CRMAP
+    include-file: gfx_map.h
+    source-format: c
+    converts:
+      - map_sprites
+
+  - type: appvar
+    name: CRTRP1
+    include-file: gfx_trp1.h
+    source-format: c
+    converts:
+      - troop_sprites1
+
+  - type: appvar
+    name: CRTRP2
+    include-file: gfx_trp2.h
+    source-format: c
+    converts:
+      - troop_sprites2
+
+  - type: appvar
+    name: CRTRP3
+    include-file: gfx_trp3.h
+    source-format: c
+    converts:
+      - troop_sprites3
