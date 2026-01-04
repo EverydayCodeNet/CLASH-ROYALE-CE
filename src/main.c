@@ -2,14 +2,17 @@
 #include <graphx.h>
 #include <fileioc.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <math.h>
+#include <sys/rtc.h>
 
 #include "ui/menu.h"
 #include "gfx/gfx.h"
 #include "game/memory_simple.h"
 #include "game/game.h"
 #include "game/data.h"
+#include "game/sprite_system.h"
 
 #define YELLOW 171
 #define WHITE 255
@@ -191,20 +194,25 @@ void draw_main_screen(void) {
                 gfx_TransparentSprite(chest_sprite, chest_x, chest_y);
             }
 
-            // Draw timer at all times, only update the clock when it is unlocking
-            if (chest->status != OPEN) {
-                unsigned int remaining = get_chest_unlock_remaining(chest);
+            // Show timer for LOCKED (total duration) and UNLOCKING (remaining time)
+            if (chest->status == LOCKED || chest->status == UNLOCKING) {
+                unsigned int time_val;
+                if (chest->status == LOCKED) {
+                    time_val = chest->duration;  // Show total unlock time
+                } else {
+                    time_val = get_chest_unlock_remaining(chest);  // Show remaining
+                }
                 int timer_x = slot_x + 45;
                 int timer_y = slot_y + 5;
 
-                if (remaining >= 60) {
-                    int minutes_val = remaining / 60;
+                if (time_val >= 60) {
+                    int minutes_val = time_val / 60;
                     drawRotatedIntXY(minutes_val, timer_x, timer_y);
                     int digit_offset = 8 * countDigits(minutes_val);
                     gfx_TransparentSprite(minute, timer_x + 1, timer_y + digit_offset + 2);
                 } else {
-                    drawRotatedIntXY(remaining, timer_x, timer_y);
-                    int digit_offset = 8 * countDigits(remaining);
+                    drawRotatedIntXY(time_val, timer_x, timer_y);
+                    int digit_offset = 8 * countDigits(time_val);
                     gfx_TransparentSprite(second, timer_x + 1, timer_y + digit_offset + 2);
                 }
             }
@@ -234,14 +242,352 @@ void draw_main_screen(void) {
     if (kb_Data[6] & kb_Enter) {
         if (selected_row == 0) {
             // Handle profile
-        } else if (selected_row == 1) {
-            // Handle chests here
+        } else if (selected_row == 1 && selected_chest >= 0 && selected_chest < 4) {
+            // Handle chests
+            if (data.chests != NULL) {
+                chest_t *chest = &data.chests[selected_chest];
+                if (chest->status == LOCKED) {
+                    // Check if we can start unlocking (no other chest unlocking)
+                    bool can_unlock = true;
+                    for (int i = 0; i < 4; i++) {
+                        if (data.chests[i].status == UNLOCKING) {
+                            can_unlock = false;
+                            break;
+                        }
+                    }
+                    if (can_unlock) {
+                        chest->status = UNLOCKING;
+                        chest->time_elapsed = 0;
+                    }
+                } else if (chest->status == OPEN) {
+                    // Open the chest - go to opening sequence
+                    chest->status = OPENING;
+                    current_screen = "chest_opening";
+                }
+            }
+            delay(150);
         } else if (selected_row == 2) {
             selected_row = 0;
             current_screen = "game";
         } else if (selected_row == 3) {
             current_screen = "exit";
         }
+    }
+}
+
+// Chest reward configuration by rarity
+static const struct {
+    unsigned int min_gold;
+    unsigned int max_gold;
+    unsigned int min_cards;
+    unsigned int max_cards;
+    unsigned int max_card_types;
+} CHEST_REWARDS[] = {
+    {20, 50, 2, 4, 2},    // SILVER
+    {50, 150, 4, 8, 3},   // GOLD
+    {100, 300, 8, 15, 4}  // MAGICAL
+};
+
+// Card weights by rarity (higher = more likely)
+static const int RARITY_WEIGHTS[] = {60, 25, 12, 3};  // COMMON, RARE, EPIC, LEGENDARY
+
+// Find the chest currently being opened (OPENING status)
+static int find_opening_chest(void) {
+    if (data.chests == NULL) return -1;
+    for (int i = 0; i < 4; i++) {
+        if (data.chests[i].status == OPENING) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Select a random card index based on weighted rarity
+static int select_weighted_card(void) {
+    if (data.available_cards == NULL) return 0;
+
+    // Calculate total weight
+    int total_weight = 0;
+    for (int i = 0; i < 8; i++) {
+        rarity_t rarity = data.available_cards[i].rarity;
+        // Bounds check for RARITY_WEIGHTS array (4 elements: COMMON=0, RARE=1, EPIC=2, LEGENDARY=3)
+        if (rarity > LEGENDARY) rarity = COMMON;
+        total_weight += RARITY_WEIGHTS[rarity];
+    }
+
+    // Safety check
+    if (total_weight <= 0) return 0;
+
+    // Pick random value and find matching card
+    int roll = rand() % total_weight;
+    int cumulative = 0;
+    for (int i = 0; i < 8; i++) {
+        rarity_t rarity = data.available_cards[i].rarity;
+        if (rarity > LEGENDARY) rarity = COMMON;
+        cumulative += RARITY_WEIGHTS[rarity];
+        if (roll < cumulative) {
+            return i;
+        }
+    }
+    return 0;  // Fallback
+}
+
+// Generate chest contents based on rarity
+static void generate_chest_contents(chest_opening_state_t *state, chest_rarity_t rarity) {
+    if (state == NULL) return;
+
+    // Ensure rarity is valid (0=SILVER, 1=GOLD, 2=MAGICAL)
+    int rarity_idx = (rarity <= MAGICAL) ? (int)rarity : 0;
+    if (rarity_idx < 0 || rarity_idx > 2) rarity_idx = 0;
+
+    // Generate random gold amount
+    unsigned int gold_range = CHEST_REWARDS[rarity_idx].max_gold - CHEST_REWARDS[rarity_idx].min_gold;
+    if (gold_range == 0) gold_range = 1;
+    state->gold = CHEST_REWARDS[rarity_idx].min_gold + (rand() % (gold_range + 1));
+
+    // Determine number of different card types (1 to max_card_types)
+    unsigned int max_types = CHEST_REWARDS[rarity_idx].max_card_types;
+    if (max_types == 0) max_types = 1;
+    if (max_types > MAX_CHEST_CARD_TYPES) max_types = MAX_CHEST_CARD_TYPES;
+    state->num_card_types = 1 + (rand() % max_types);
+    if (state->num_card_types > MAX_CHEST_CARD_TYPES) {
+        state->num_card_types = MAX_CHEST_CARD_TYPES;
+    }
+
+    // Calculate total cards to distribute
+    unsigned int card_range = CHEST_REWARDS[rarity_idx].max_cards - CHEST_REWARDS[rarity_idx].min_cards;
+    if (card_range == 0) card_range = 1;
+    unsigned int total_cards = CHEST_REWARDS[rarity_idx].min_cards + (rand() % (card_range + 1));
+    if (total_cards == 0) total_cards = 1;
+
+    // Track which cards have been selected to avoid duplicates
+    bool card_used[8] = {false};
+
+    // Generate each card type
+    for (unsigned int i = 0; i < state->num_card_types && i < MAX_CHEST_CARD_TYPES; i++) {
+        // Select a card that hasn't been used yet
+        int card_idx = 0;
+        int attempts = 0;
+        do {
+            card_idx = select_weighted_card();
+            if (card_idx < 0 || card_idx >= 8) card_idx = 0;
+            attempts++;
+        } while (card_used[card_idx] && attempts < 20);
+
+        card_used[card_idx] = true;
+        state->cards[i].card_index = card_idx;
+
+        // Distribute cards - last type gets remaining cards
+        if (i == state->num_card_types - 1) {
+            state->cards[i].count = (total_cards > 0) ? total_cards : 1;
+        } else {
+            // Give 1 to half of remaining cards to this type
+            unsigned int max_for_type = (total_cards > 1) ? (total_cards / 2) : 1;
+            if (max_for_type == 0) max_for_type = 1;
+            state->cards[i].count = 1 + (rand() % max_for_type);
+            if (state->cards[i].count > total_cards) {
+                state->cards[i].count = total_cards;
+            }
+            total_cards -= state->cards[i].count;
+        }
+    }
+
+    state->generated = true;
+}
+
+void draw_chest_opening(void) {
+    // Static state persists across frames
+    static chest_opening_state_t state = {0};
+    static unsigned int sequence_index = 0;
+
+    kb_Scan();
+    gfx_FillScreen(80);
+
+    // Find the chest being opened
+    int chest_idx = find_opening_chest();
+    if (chest_idx < 0) {
+        state.generated = false;
+        sequence_index = 0;
+        current_screen = "main";
+        return;
+    }
+
+    chest_t *chest = &data.chests[chest_idx];
+
+    // Generate contents on first frame - TEST THIS
+    if (!state.generated || state.opening_chest_index != chest_idx) {
+        state.opening_chest_index = chest_idx;
+        sequence_index = 0;
+        state.num_card_types = 0;
+        generate_chest_contents(&state, chest->rarity);
+    }
+
+    // Safety checks
+    if (state.num_card_types == 0 || state.num_card_types > MAX_CHEST_CARD_TYPES) {
+        state.num_card_types = 1;
+    }
+
+    unsigned int max_sequence = 2 + state.num_card_types;
+    if (max_sequence > 10) max_sequence = 10;
+
+    // Draw header
+    gfx_TransparentSprite(trophy, 285, 15);
+    drawRotatedIntXY(data.trophies, 287, 32);
+    gfx_TransparentSprite(gold_coin, 285, 80);
+    drawRotatedIntXY(data.gold, 287, 100);
+
+    // Draw dots vertically on left side, centered vertically
+    int total_dots = max_sequence + 1;
+    int dot_spacing = 15;
+    int dots_height = (total_dots - 1) * dot_spacing;
+    int dot_x = 20;
+    int dot_start_y = 120 - (dots_height / 2);
+    for (unsigned int i = 0; i <= max_sequence; i++) {
+        int dot_y = dot_start_y + (i * dot_spacing);
+        if (i == sequence_index) {
+            gfx_SetColor(YELLOW);
+            gfx_FillCircle(dot_x, dot_y, 5);
+        } else if (i < sequence_index) {
+            gfx_SetColor(255);
+            gfx_FillCircle(dot_x, dot_y, 4);
+        } else {
+            gfx_SetColor(255);
+            gfx_Circle(dot_x, dot_y, 4);
+        }
+    }
+
+    if (sequence_index == 0) {
+        gfx_sprite_t *chest_sprite = chest->sprite;
+        if (chest_sprite != NULL && chest_sprite->width > 0 && chest_sprite->height > 0) {
+            int scaled_w = chest_sprite->width * 2;
+            int scaled_h = chest_sprite->height * 2;
+            int cx = 160 - (scaled_w / 2);
+            int cy = 120 - (scaled_h / 2);
+            if (cx >= 0 && cy >= 0 && cx + scaled_w <= 320 && cy + scaled_h <= 240) {
+                gfx_RotatedScaledTransparentSprite(chest_sprite, cx, cy, 0, 128);
+            }
+        }
+    } else if (sequence_index == 1) {
+        if (gold_card != NULL && gold_card->width > 0 && gold_card->height > 0) {
+            int scaled_w = gold_card->width * 2;
+            int scaled_h = gold_card->height * 2;
+            int gx = 160 - (scaled_w / 2);
+            int gy = 100 - (scaled_h / 2);
+            if (gx >= 0 && gy >= 0 && gx + scaled_w <= 320 && gy + scaled_h <= 240) {
+                gfx_Sprite(gold_card, gx, gy);
+            }
+        }
+        
+        gfx_TransparentSprite(plus, 125, 110);
+        drawRotatedIntXY(state.gold, 125, 120);
+    } else if (sequence_index >= 2 && sequence_index < 2 + state.num_card_types) {
+        unsigned int card_step = sequence_index - 2;
+        if (card_step >= MAX_CHEST_CARD_TYPES) card_step = 0;
+        int card_idx = state.cards[card_step].card_index;
+        if (card_idx < 0 || card_idx >= 8) card_idx = 0;
+        unsigned int card_count = state.cards[card_step].count;
+        if (card_count == 0) card_count = 1;
+
+        if (card_idx >= 0 && card_idx < 8) {
+            gfx_sprite_t *card_sprite = data.available_cards[card_idx].sprite;
+            if (card_sprite != NULL && card_sprite->width > 0 && card_sprite->height > 0) {
+                int scaled_w = card_sprite->width * 2;
+                int scaled_h = card_sprite->height * 2;
+                int cx = 160 - (scaled_w / 2);
+                int cy = 100 - (scaled_h / 2);
+                if (cx >= 0 && cy >= 0 && cx + scaled_w <= 320 && cy + scaled_h <= 240) {
+                    gfx_Sprite(card_sprite, cx, cy);
+                }
+            }
+            gfx_TransparentSprite(plus, 125, 110);
+            drawRotatedIntXY(card_count, 125, 120);
+
+            rarity_t rarity = data.available_cards[card_idx].rarity;
+            int bar_color = 151;
+            if (rarity == RARE) bar_color = 150;
+            else if (rarity == EPIC) bar_color = 202;
+            else if (rarity == LEGENDARY) bar_color = 171;
+            // gfx_SetColor(bar_color);
+            // gfx_FillRectangle(110, 70, 10, 30);
+            // gfx_SetColor(0);
+            // gfx_Rectangle(110, 70, 10, 30);
+        }
+    } else {
+        // Summary screen: 2-column grid like deck screen (right col first), chest at bottom
+        int total_items = 1 + state.num_card_types;  // gold + cards
+        int col_spacing = 50;
+        int row_spacing = 40;
+
+        // Center horizontally: right column first (like deck screen)
+        int right_col_x = 160;
+        int left_col_x = 160 - col_spacing;
+
+        // Calculate rows needed per column (items 0-3 right, 4-7 left)
+        int right_col_items = (total_items > 4) ? 4 : total_items;
+        int grid_height = right_col_items * row_spacing;
+        int start_y = 80 - (grid_height / 2) + 20;
+
+        // Draw gold card first (item 0) - top of right column
+        int gold_x = right_col_x;
+        int gold_y = start_y;
+        gfx_TransparentSprite(gold_card, gold_x, gold_y);
+        // gfx_TransparentSprite(plus, gold_x + 20, gold_y + 5);
+        // drawRotatedIntXY(state.gold, gold_x + 35, gold_y + 5);
+
+        // Draw card types (items 1+)
+        for (unsigned int i = 0; i < state.num_card_types; i++) {
+            int item_idx = i + 1;  // offset by 1 for gold card
+            // Items 0-3 right column, 4-7 left column (like deck screen)
+            int card_x = (item_idx < 4) ? right_col_x : left_col_x;
+            int card_y = start_y + ((item_idx < 4) ? item_idx : (item_idx - 4)) * row_spacing;
+
+            int card_idx = state.cards[i].card_index;
+            if (card_idx >= 0 && card_idx < 8) {
+                gfx_sprite_t *card_sprite = data.available_cards[card_idx].sprite;
+                if (card_sprite != NULL && card_sprite->width > 0 && card_sprite->height > 0) {
+                    gfx_Sprite(card_sprite, card_x, card_y);
+                    // drawRotatedIntXY(state.cards[i].count, card_x + 30, card_y + 35);
+                }
+            }
+        }
+
+        // Draw chest centered at bottom
+        gfx_sprite_t *chest_sprite = chest->sprite;
+        if (chest_sprite != NULL && chest_sprite->width > 0 && chest_sprite->height > 0) {
+            int chest_x = 160 - (chest_sprite->width / 2);
+            int chest_y = 180;
+            gfx_TransparentSprite(chest_sprite, chest_x, chest_y);
+        }
+    }
+
+    if (kb_Data[6] & kb_Enter) {
+        // Wait for key release to prevent multiple triggers
+        while (kb_Data[6] & kb_Enter) {
+            kb_Scan();
+        }
+        delay(50);
+        if (sequence_index < max_sequence) {
+            sequence_index++;
+        } else {
+            data.gold += state.gold;
+            chest->status = EMPTY;
+            chest->gold = 0;
+            chest->total_cards = 0;
+            state.generated = false;
+            sequence_index = 0;
+            current_screen = "main";
+        }
+    }
+
+    if (kb_Data[6] & kb_Clear) {
+        delay(150);
+        data.gold += state.gold;
+        chest->status = EMPTY;
+        chest->gold = 0;
+        chest->total_cards = 0;
+        state.generated = false;
+        sequence_index = 0;
+        current_screen = "main";
     }
 }
 
@@ -285,12 +631,8 @@ void draw_deck_screen(void) {
         int y = 15 + ((i < 4) ? i : (i - 4)) * 40;
 
         // Draw card sprite inside the rectangle
-        if (data.deck != NULL) {
-            gfx_sprite_t *card_sprite = data.deck[i].sprite;
-           
-            if (card_sprite != NULL) {
-                gfx_Sprite(card_sprite, x, y);
-            }
+        if (data.deck != NULL && data.deck[i].sprite != NULL) {
+            gfx_Sprite(data.deck[i].sprite, x, y);
         }
         // Debug sprite
         // gfx_Sprite(musketeer_card, x, y);
@@ -328,11 +670,6 @@ void draw_deck_screen(void) {
         // Draw outer border
         gfx_Rectangle(175, 175, 90, 20);
 
-        // Draw elixir cost number
-        char elixir_str[4];
-        sprintf(elixir_str, "%d", elixir_cost);
-        gfx_SetTextFGColor(255);
-        gfx_PrintStringXY(elixir_str, 215, 178);
 
         // kb_Up = move right in UI (left column to right column)
         if ((kb_Data[7] & kb_Up) && selected_card > 0) {
@@ -373,47 +710,38 @@ void draw_gameover(void) {
 
     gfx_FillScreen(80);
 
-    // Draw victory/defeat text
-    // gfx_SetTextFGColor(255);
-    // if (data.has_pending_result) {
-    //     if (data.last_victory) {
-    //         gfx_PrintStringXY("VICTORY!", 130, 10);
-    //     } else {
-    //         gfx_PrintStringXY("DEFEAT", 135, 10);
-    //     }
-    // }
-
     // Draw crown count (0-3 crowns earned)
     // Left side - Player crowns
-    // for (unsigned int i = 0; i < 3; i++) {
-    //     gfx_sprite_t *crown_sprite = (i < data.last_player_crowns) ? blue_crown : empty_crown;
-    //     gfx_RotatedScaledTransparentSprite(crown_sprite, 180, 60 + (i * 40), 0, 128);
-    // }
+    for (unsigned int i = 0; i < 3; i++) {
+        gfx_sprite_t *crown_sprite = (i < data.last_player_crowns) ? blue_crown : empty_crown;
+        gfx_TransparentSprite(crown_sprite, 190, 40 + (i * 60));
+    }
 
     // // // Right side crowns - opponent
-    // for (unsigned int i = 0; i < 3; i++) {
-    //     gfx_sprite_t *crown_sprite = (i < data.last_opponent_crowns) ? red_crown : empty_crown;
-    //     gfx_RotatedScaledTransparentSprite(crown_sprite, 250, 60 + (i * 40), 0, 128);
-    // }
+    for (unsigned int i = 0; i < 3; i++) {
+        gfx_sprite_t *crown_sprite = (i < data.last_opponent_crowns) ? red_crown : empty_crown;
+        gfx_TransparentSprite(crown_sprite, 250, 40 + (i * 60));
+    }
 
     // Draw trophy reward/loss
-    gfx_TransparentSprite(trophy, 122, 125);
-    gfx_SetTextFGColor(255);
+    gfx_TransparentSprite(trophy, 125, 120);
     if (data.last_trophy_change >= 0) {
-        gfx_PrintStringXY("+", 140, 125);
-        drawRotatedIntXY(data.last_trophy_change, 140, 133);
+        gfx_TransparentSprite(plus, 127 , 135);
+        drawRotatedIntXY(data.last_trophy_change, 127, 147);
     } else {
-        // Use "|" for minus sign since screen is rotated
-        gfx_PrintStringXY("|", 140, 125);
-        drawRotatedIntXY(-data.last_trophy_change, 140, 133);
+        gfx_TransparentSprite(minus, 127, 135);
+        drawRotatedIntXY(-data.last_trophy_change, 127, 147);  // Pass absolute value
     }
 
     // Draw chest reward (if won)
     if (data.last_chest_given) {
         gfx_sprite_t *chest_sprite = get_chest_sprite(data.last_chest_awarded);
-        gfx_TransparentSprite(chest_sprite, 110, 45);
+        gfx_TransparentSprite(chest_sprite, 115, 60);
     }
-    // gfx_TransparentSprite(silver_chest, 110, 45);
+
+    // Empty rectangle regardlss
+    gfx_SetColor(255);
+    gfx_Rectangle(115, 60, 40, 40);
 
     // Draw continue button
     gfx_TransparentSprite(play_again, 30, 15);
@@ -472,9 +800,27 @@ void draw_game(void) {
 void draw_screens(void) {
     // Quit game can only be called from here
     bool exit = false;
+
+    // Track time for chest unlock timers
+    uint8_t last_seconds, last_minutes, last_hours;
+    boot_GetTime(&last_seconds, &last_minutes, &last_hours);
+
     while (exit == false) {
         kb_Scan();
         gfx_SetDrawBuffer();
+
+        // Update chest timers every second
+        uint8_t curr_sec, curr_min, curr_hour;
+        boot_GetTime(&curr_sec, &curr_min, &curr_hour);
+        if (curr_sec != last_seconds || curr_min != last_minutes || curr_hour != last_hours) {
+            unsigned int delta = (curr_hour - last_hours) * 3600 +
+                                 (curr_min - last_minutes) * 60 +
+                                 (curr_sec - last_seconds);
+            update_chest_timers(&data, delta);
+            last_seconds = curr_sec;
+            last_minutes = curr_min;
+            last_hours = curr_hour;
+        }
 
         if (kb_Data[6] & kb_Clear && strcmp(current_screen, "gameover") != 0) {
             exit = true;
@@ -484,6 +830,8 @@ void draw_screens(void) {
             draw_loading_screen();
         } else if (strcmp(current_screen, "main") == 0) {
             draw_main_screen();
+        } else if (strcmp(current_screen, "chest_opening") == 0) {
+            draw_chest_opening();
         } else if (strcmp(current_screen, "deck") == 0) {
             draw_deck_screen();
         } else if (strcmp(current_screen, "game") == 0) {

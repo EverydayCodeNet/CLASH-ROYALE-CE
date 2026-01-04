@@ -16,11 +16,92 @@
 #include "../game/structs.h"
 #include "../game/memory_simple.h"
 #include "../game/sprite_anchors.h"
+#include "../game/sprite_system.h"
 #include "menu.h"
 
 #define TOTAL_CARDS 8
 
 const char *appvarName = "slota";
+
+// Sprite sheet definitions for all troops
+// Sheet layout: [MoveL, MoveN, MoveR, Atk1, Atk2] per sheet (5 frames)
+// Two sheets per troop: _forward (back visible), _backward (front visible)
+
+static troop_sprite_def_t MINER_SPRITE_DEF = {
+    .sheet_up = NULL,    // miner_sheet_forward - Set at runtime
+    .sheet_down = NULL,  // miner_sheet_backward - Set at runtime
+    .frame_width = 45,
+    .frame_height = 45,
+    .movement_start = 0,
+    .movement_count = 3,
+    .movement_sequence = {1, 0, 1, 2},  // N, L, N, R
+    .movement_sequence_len = 4,
+    .attack_start = 3,
+    .attack_count = 2,
+    .has_projectile = 0,
+    .projectile_frame = 0,
+    .projectile_width = 0,
+    .projectile_height = 0,
+    .anchor_x = 22,
+    .anchor_y = 40,
+};
+
+static troop_sprite_def_t MUSKETEER_SPRITE_DEF = {
+    .sheet_up = NULL,    // musketeer_sheet_forward - Set at runtime
+    .sheet_down = NULL,  // musketeer_sheet_backward - Set at runtime
+    .frame_width = 40,
+    .frame_height = 40,
+    .movement_start = 0,
+    .movement_count = 3,
+    .movement_sequence = {1, 0, 1, 2},  // N, L, N, R
+    .movement_sequence_len = 4,
+    .attack_start = 3,
+    .attack_count = 2,
+    .has_projectile = 1,
+    .projectile_frame = 0,  // Projectile is separate sprite (bullet)
+    .projectile_width = 0,
+    .projectile_height = 0,
+    .anchor_x = 20,
+    .anchor_y = 35,
+};
+
+static troop_sprite_def_t GIANT_SPRITE_DEF = {
+    .sheet_up = NULL,    // giant_sheet_forward - Set at runtime
+    .sheet_down = NULL,  // giant_sheet_backward - Set at runtime
+    .frame_width = 50,
+    .frame_height = 50,
+    .movement_start = 0,
+    .movement_count = 3,
+    .movement_sequence = {1, 0, 1, 2},  // N, L, N, R
+    .movement_sequence_len = 4,
+    .attack_start = 3,
+    .attack_count = 2,
+    .has_projectile = 0,
+    .projectile_frame = 0,
+    .projectile_width = 0,
+    .projectile_height = 0,
+    .anchor_x = 25,
+    .anchor_y = 45,
+};
+
+static troop_sprite_def_t KNIGHT_SPRITE_DEF = {
+    .sheet_up = NULL,    // knight_sheet_forward - Set at runtime
+    .sheet_down = NULL,  // knight_sheet_backward - Set at runtime
+    .frame_width = 45,
+    .frame_height = 45,
+    .movement_start = 0,
+    .movement_count = 3,
+    .movement_sequence = {1, 0, 1, 2},  // N, L, N, R
+    .movement_sequence_len = 4,
+    .attack_start = 3,
+    .attack_count = 2,
+    .has_projectile = 0,
+    .projectile_frame = 0,
+    .projectile_width = 0,
+    .projectile_height = 0,
+    .anchor_x = 22,
+    .anchor_y = 40,
+};
 
 // create_save() function is now defined in data.c
 
@@ -247,8 +328,10 @@ screen_t *get_screen_by_name(screen_t *screen, char *screen_name) {
 void open_chest(screen_t *screen, chest_t *chest) {
     screen->active = false;
     screen_t *chest_opening = get_screen_by_name(screen, "chest_opening");
-    chest_opening->active = true;
-    chest->status = UNLOCKING;
+    if (chest_opening != NULL) {
+        chest_opening->active = true;
+    }
+    chest->status = OPENING;
     chest->unlock_step = 0;
 }
 
@@ -1144,63 +1227,58 @@ void init_deck(data_t *data) {
     init_card(&available_cards[6], elixir_collector_card, BUILDING, RARE, STATIONARY, ALL, false, 6);
     init_card(&available_cards[7], knight_card, TROOP, COMMON, GROUND_MOVEMENT, GROUND, true, 3);
 
+    // Initialize all sprite_def pointers to NULL (old system fallback)
+    for (int i = 0; i < TOTAL_CARDS; i++) {
+        available_cards[i].sprite_def = NULL;
+    }
+
+    // Set up sprite sheet system for troops
+    // Miner (index 0)
+    MINER_SPRITE_DEF.sheet_up = miner_sheet_forward;
+    MINER_SPRITE_DEF.sheet_down = miner_sheet_backward;
+    available_cards[0].sprite_def = &MINER_SPRITE_DEF;
+
+    // Musketeer (index 1)
+    MUSKETEER_SPRITE_DEF.sheet_up = musketeer_sheet_forward;
+    MUSKETEER_SPRITE_DEF.sheet_down = musketeer_sheet_backward;
+    available_cards[1].sprite_def = &MUSKETEER_SPRITE_DEF;
+
+    // Balloon (index 2) - stays with old system (single sprite)
+
+    // Giant (index 3)
+    GIANT_SPRITE_DEF.sheet_up = giant_sheet_forward;
+    GIANT_SPRITE_DEF.sheet_down = giant_sheet_backward;
+    available_cards[3].sprite_def = &GIANT_SPRITE_DEF;
+
+    // Zap (index 4) - spell, no sprite_def
+    // Poison (index 5) - spell, no sprite_def
+    // Elixir Collector (index 6) - building, no sprite_def
+
+    // Knight (index 7)
+    KNIGHT_SPRITE_DEF.sheet_up = knight_sheet_forward;
+    KNIGHT_SPRITE_DEF.sheet_down = knight_sheet_backward;
+    available_cards[7].sprite_def = &KNIGHT_SPRITE_DEF;
+
     // Set sprite anchor points from lookup table
     for (int i = 0; i < TOTAL_CARDS; i++) {
         available_cards[i].anchor_x = SPRITE_ANCHORS[i].x;
         available_cards[i].anchor_y = SPRITE_ANCHORS[i].y;
     }
 
-    init_cursor(&available_cards[0], miner_stepL);
-    init_cursor(&available_cards[1], musketeer_stepL);
-    init_cursor(&available_cards[2], balloon);
-    init_cursor(&available_cards[3], g_stepN);
-    init_cursor(&available_cards[4], NULL);
-    init_cursor(&available_cards[5], NULL);
-    init_cursor(&available_cards[6], elixir_collector);
-    init_cursor(&available_cards[7], knight_stepN);
+    // Cursor sprites - NULL for sprite sheet troops (cursor will use sprite_def)
+    init_cursor(&available_cards[0], NULL);  // Miner (sprite sheet)
+    init_cursor(&available_cards[1], NULL);  // Musketeer (sprite sheet)
+    init_cursor(&available_cards[2], balloon);  // Balloon (old system)
+    init_cursor(&available_cards[3], NULL);  // Giant (sprite sheet)
+    init_cursor(&available_cards[4], NULL);  // Zap (spell)
+    init_cursor(&available_cards[5], NULL);  // Poison (spell)
+    init_cursor(&available_cards[6], elixir_collector);  // Building
+    init_cursor(&available_cards[7], NULL);  // Knight (sprite sheet)
 
     // init_projectile(card, sprite, damage, speed)
     init_projectile(&available_cards[1], bullet, 50, 2);
 
-    // memcpy(attack_cycle, miner_attack_cycle_rev, sizeof(miner_attack_cycle_rev));
-
-    gfx_sprite_t **miner_movement = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    miner_movement[0] = miner_stepL;
-    miner_movement[1] = miner_stepR;
-
-    gfx_sprite_t **miner_movement_rev = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    miner_movement_rev[0] = miner_stepL_opp;
-    miner_movement_rev[1] = miner_stepR_opp;
-
-    gfx_sprite_t **miner_attack_cycle = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    miner_attack_cycle[0] = miner_stepL;
-    miner_attack_cycle[1] = miner_attack;
-
-    gfx_sprite_t **miner_attack_cycle_rev = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    miner_attack_cycle_rev[0] = miner_stepL_opp;
-    miner_attack_cycle_rev[1] = miner_attack_opp;
-
-    // Giant movement with full 4 frames
-    gfx_sprite_t **giant_movement = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
-    giant_movement[0] = g_stepN;
-    giant_movement[1] = g_stepL;
-    giant_movement[2] = g_stepN;
-    giant_movement[3] = g_stepR;
-
-    gfx_sprite_t **giant_movement_rev = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
-    giant_movement_rev[0] = g_stepN_opp;
-    giant_movement_rev[1] = g_stepL_opp;
-    giant_movement_rev[2] = g_stepN_opp;
-    giant_movement_rev[3] = g_stepR_opp;
-
-    gfx_sprite_t **giant_attack_cycle = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    giant_attack_cycle[0] = g_attack;
-    giant_attack_cycle[1] = g_stepN;
-
-    gfx_sprite_t **giant_attack_cycle_rev = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    giant_attack_cycle_rev[0] = g_attack_opp;
-    giant_attack_cycle_rev[1] = g_stepN_opp;
-
+    // Balloon still uses old sprite system (single sprite, no sheet)
     gfx_sprite_t **balloon_movement = CR_MALLOC(sizeof(gfx_sprite_t *));
     balloon_movement[0] = balloon;
 
@@ -1209,67 +1287,26 @@ void init_deck(data_t *data) {
     balloon_attack[1] = balloon;
 
     gfx_sprite_t **balloon_movement_rev = CR_MALLOC(sizeof(gfx_sprite_t *));
-    balloon_movement_rev[0] = balloon;
+    balloon_movement_rev[0] = balloon_opp;
 
     gfx_sprite_t **balloon_attack_rev = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    balloon_attack_rev[0] = balloon;
-    balloon_attack_rev[1] = balloon;
+    balloon_attack_rev[0] = balloon_opp;
+    balloon_attack_rev[1] = balloon_opp;
 
-    // Knight movement with full 4 frames
-    gfx_sprite_t **knight_movement = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
-    knight_movement[0] = knight_stepN;
-    knight_movement[1] = knight_stepL;
-    knight_movement[2] = knight_stepN;
-    knight_movement[3] = knight_stepR;
-
-    gfx_sprite_t **knight_movement_rev = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
-    knight_movement_rev[0] = knight_stepN_opp;
-    knight_movement_rev[1] = knight_stepL_opp;
-    knight_movement_rev[2] = knight_stepN_opp;
-    knight_movement_rev[3] = knight_stepR_opp;
-
-    gfx_sprite_t **knight_attack_cycle = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    knight_attack_cycle[0] = knight_attack;
-    knight_attack_cycle[1] = knight_stepN;
-
-    gfx_sprite_t **knight_attack_cycle_rev = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    knight_attack_cycle_rev[0] = knight_attack_opp;
-    knight_attack_cycle_rev[1] = knight_stepN_opp;
-
-    // Musketeer movement with full 4 frames
-    gfx_sprite_t **musketeer_movement = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
-    musketeer_movement[0] = musketeer_stepN;
-    musketeer_movement[1] = musketeer_stepL;
-    musketeer_movement[2] = musketeer_stepN;
-    musketeer_movement[3] = musketeer_stepR;
-
-    gfx_sprite_t **musketeer_movement_rev = CR_MALLOC(4 * sizeof(gfx_sprite_t *));
-    musketeer_movement_rev[0] = musketeer_stepL_opp;
-    musketeer_movement_rev[1] = musketeer_stepN;
-    musketeer_movement_rev[2] = musketeer_stepR_opp;
-    musketeer_movement_rev[3] = musketeer_stepN;
-
-    gfx_sprite_t **musketeer_attack_cycle = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    musketeer_attack_cycle[0] = musketeer_attack;
-    musketeer_attack_cycle[1] = musketeer_stepN;
-
-    gfx_sprite_t **musketeer_attack_cycle_rev = CR_MALLOC(2 * sizeof(gfx_sprite_t *));
-    musketeer_attack_cycle_rev[0] = musketeer_attack_opp;
-    musketeer_attack_cycle_rev[1] = musketeer_stepL_opp;
-
-    // Initialize troops
-    init_troop(&available_cards[0], miner_movement, miner_movement_rev, miner_attack_cycle, miner_attack_cycle_rev, 2, 2);
-    init_troop(&available_cards[1], musketeer_movement, musketeer_movement_rev, musketeer_attack_cycle, musketeer_attack_cycle_rev, 4, 2);
-    init_troop(&available_cards[2], balloon_movement, balloon_movement_rev, balloon_attack, balloon_attack_rev, 1, 1);
-    init_troop(&available_cards[3], giant_movement, giant_movement_rev, giant_attack_cycle, giant_attack_cycle_rev, 4, 2);
-    init_troop(&available_cards[7], knight_movement, knight_movement_rev, knight_attack_cycle, knight_attack_cycle_rev, 4, 2);
+    // Initialize troops - sprite sheet troops use NULL for old arrays
+    // Miner, Musketeer, Giant, Knight use new sprite sheet system (sprite_def)
+    init_troop(&available_cards[0], NULL, NULL, NULL, NULL, 2, 2);  // Miner
+    init_troop(&available_cards[1], NULL, NULL, NULL, NULL, 4, 2);  // Musketeer
+    init_troop(&available_cards[2], balloon_movement, balloon_movement_rev, balloon_attack, balloon_attack_rev, 1, 1);  // Balloon (old system)
+    init_troop(&available_cards[3], NULL, NULL, NULL, NULL, 4, 2);  // Giant
+    init_troop(&available_cards[7], NULL, NULL, NULL, NULL, 4, 2);  // Knight
 
     // Attack type, speed, damage, range (tiles)
-    set_attack_vars(&available_cards[0], MELEE, 1, 50, 1);
-    set_attack_vars(&available_cards[1], RANGED, 1, 50, 5);
-    set_attack_vars(&available_cards[2], MELEE, 1, 100, 0.5);
-    set_attack_vars(&available_cards[2], MELEE, 1, 100, 1);
-    set_attack_vars(&available_cards[7], MELEE, 1, 25, 0.5);
+    set_attack_vars(&available_cards[0], MELEE, 1, 50, 1);      // Miner
+    set_attack_vars(&available_cards[1], RANGED, 1, 50, 5);     // Musketeer
+    set_attack_vars(&available_cards[2], MELEE, 1, 100, 0.5);   // Balloon
+    set_attack_vars(&available_cards[3], MELEE, 1, 150, 1);     // Giant
+    set_attack_vars(&available_cards[7], MELEE, 1, 25, 0.5);    // Knight
 
     // set_attack_speed;
     // set_damage()

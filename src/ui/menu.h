@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include <graphx.h>
 #include <keypadc.h>
 #include "../game/data.h"
