@@ -69,6 +69,10 @@ converts:
       - chests/silver_chest.png
       - chests/gold_chest.png
       - chests/magical_chest.png
+      - ui/minus.png
+      - ui/plus.png
+      - ui/gold_card.png
+      - map/tiles/walkway.png
 
   # Group 2: Card sprites and towers
   - name: card_sprites
@@ -102,46 +106,25 @@ converts:
       - ui/logo.png
       - ui/battle.png
 
-  # Group 4: Miner and Musketeer troop animations
+  # Group 4: Miner and Musketeer sprite sheets
   - name: troop_sprites1
     palette: global_palette
     transparent-color-index: 170
     images:
-      - cards/troops/miner/miner_stepL.png
-      - cards/troops/miner/miner_stepR.png
-      - cards/troops/miner/miner_attack.png
-      - cards/troops/miner/miner_stepL_opp.png
-      - cards/troops/miner/miner_stepR_opp.png
-      - cards/troops/miner/miner_attack_opp.png
-      - cards/troops/musketeer/musketeer_stepN.png
-      - cards/troops/musketeer/musketeer_stepL.png
-      - cards/troops/musketeer/musketeer_stepR.png
-      - cards/troops/musketeer/musketeer_attack.png
-      - cards/troops/musketeer/musketeer_stepL_opp.png
-      - cards/troops/musketeer/musketeer_stepR_opp.png
-      - cards/troops/musketeer/musketeer_attack_opp.png
+      - cards/troops/miner/miner_sheet_forward.png
+      - cards/troops/miner/miner_sheet_backward.png
+      - cards/troops/musketeer/musketeer_sheet_forward.png
+      - cards/troops/musketeer/musketeer_sheet_backward.png
 
-  # Group 5: Giant and Knight troop animations
+  # Group 5: Giant and Knight sprite sheets
   - name: troop_sprites2
     palette: global_palette
     transparent-color-index: 170
     images:
-      - cards/troops/giant/g_stepN.png
-      - cards/troops/giant/g_stepL.png
-      - cards/troops/giant/g_stepR.png
-      - cards/troops/giant/g_attack.png
-      - cards/troops/giant/g_stepN_opp.png
-      - cards/troops/giant/g_stepL_opp.png
-      - cards/troops/giant/g_stepR_opp.png
-      - cards/troops/giant/g_attack_opp.png
-      - cards/troops/knight/knight_stepN.png
-      - cards/troops/knight/knight_stepL.png
-      - cards/troops/knight/knight_stepR.png
-      - cards/troops/knight/knight_attack.png
-      - cards/troops/knight/knight_stepN_opp.png
-      - cards/troops/knight/knight_stepL_opp.png
-      - cards/troops/knight/knight_stepR_opp.png
-      - cards/troops/knight/knight_attack_opp.png
+      - cards/troops/giant/giant_sheet_forward.png
+      - cards/troops/giant/giant_sheet_backward.png
+      - cards/troops/knight/knight_sheet_forward.png
+      - cards/troops/knight/knight_sheet_backward.png
 
   # Group 6: Balloon and buildings
   - name: troop_sprites3
@@ -163,8 +146,8 @@ converts:
 
 outputs:
   # Palette must be compiled into program (not in appvar)
+  # Note: global_palette.h is manually maintained - convimg only generates the .c file
   - type: c
-    include-file: global_palette.h
     palettes:
       - global_palette
 
