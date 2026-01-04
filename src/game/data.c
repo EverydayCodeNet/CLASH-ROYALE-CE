@@ -27,18 +27,48 @@ void init_data_defaults(data_t *data) {
         data->deck_order[i] = i;
     }
 
-    // Initialize chests array
+    // Initialize chests array with test chests
     data->chests = CR_MALLOC(sizeof(chest_t) * 4);
-    for (int i = 0; i < 4; i++) {
-        data->chests[i].status = EMPTY;
-        data->chests[i].rarity = SILVER;
-        data->chests[i].gold = 0;
-        data->chests[i].total_cards = 0;
-        data->chests[i].unlock_step = 0;
-        data->chests[i].time_elapsed = 0;
-        data->chests[i].duration = 0;
-        data->chests[i].sprite = silver_chest;
-    }
+
+    // Chest 0: Silver (locked)
+    data->chests[0].status = LOCKED;
+    data->chests[0].rarity = SILVER;
+    data->chests[0].gold = 50;
+    data->chests[0].total_cards = 3;
+    data->chests[0].unlock_step = 0;
+    data->chests[0].time_elapsed = 0;
+    data->chests[0].duration = 60;  // 1 minute
+    data->chests[0].sprite = silver_chest;
+
+    // Chest 1: Gold (locked)
+    data->chests[1].status = LOCKED;
+    data->chests[1].rarity = GOLD;
+    data->chests[1].gold = 100;
+    data->chests[1].total_cards = 6;
+    data->chests[1].unlock_step = 0;
+    data->chests[1].time_elapsed = 0;
+    data->chests[1].duration = 120;  // 2 minutes
+    data->chests[1].sprite = gold_chest;
+
+    // Chest 2: Magical (locked)
+    data->chests[2].status = LOCKED;
+    data->chests[2].rarity = MAGICAL;
+    data->chests[2].gold = 200;
+    data->chests[2].total_cards = 10;
+    data->chests[2].unlock_step = 0;
+    data->chests[2].time_elapsed = 0;
+    data->chests[2].duration = 240;  // 4 minutes
+    data->chests[2].sprite = magical_chest;
+
+    // Chest 3: Empty
+    data->chests[3].status = EMPTY;
+    data->chests[3].rarity = SILVER;
+    data->chests[3].gold = 0;
+    data->chests[3].total_cards = 0;
+    data->chests[3].unlock_step = 0;
+    data->chests[3].time_elapsed = 0;
+    data->chests[3].duration = 0;
+    data->chests[3].sprite = silver_chest;
 }
 
 bool data_file_exists(void) {
@@ -112,6 +142,16 @@ void load_data(void) {
             data.chests[i].duration = save.chests[i].duration;
             data.chests[i].unlock_step = 0;
             data.chests[i].sprite = get_chest_sprite(save.chests[i].rarity);
+
+            // Fix corrupt/old chests: if UNLOCKING with no duration, mark as OPEN
+            if (data.chests[i].status == UNLOCKING && data.chests[i].duration == 0) {
+                data.chests[i].status = OPEN;
+            }
+            // If UNLOCKING and timer already complete, mark as OPEN
+            if (data.chests[i].status == UNLOCKING &&
+                data.chests[i].time_elapsed >= data.chests[i].duration) {
+                data.chests[i].status = OPEN;
+            }
         }
     } else {
         // File doesn't exist, create defaults

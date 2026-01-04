@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include "structs.h"
 
 // Persistent chest data (for save file)

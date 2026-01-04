@@ -5,10 +5,42 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include <graphx.h>
 #include "utils.h"
 
 typedef enum {AIR, GROUND, ALL} target_type_t;
+
+// Unified sprite sheet system for troops
+typedef struct {
+    gfx_sprite_t *sheet_up;           // Sprite sheet for facing up (back visible)
+    gfx_sprite_t *sheet_down;         // Sprite sheet for facing down (front visible)
+
+    // Frame dimensions (all frames same size)
+    uint8_t frame_width;
+    uint8_t frame_height;
+
+    // Movement animation
+    uint8_t movement_start;           // First movement frame index
+    uint8_t movement_count;           // Number of unique movement frames
+    uint8_t movement_sequence[8];     // Frame order (e.g., {1,0,1,2} for N-L-N-R)
+    uint8_t movement_sequence_len;    // Length of sequence
+
+    // Attack animation
+    uint8_t attack_start;             // First attack frame index
+    uint8_t attack_count;             // Number of attack frames
+
+    // Projectile (optional)
+    uint8_t has_projectile;           // 0 = melee, 1 = ranged
+    uint8_t projectile_frame;         // Frame index for projectile sprite
+    uint8_t projectile_width;         // May differ from troop frame size
+    uint8_t projectile_height;
+
+    // Anchor point (feet position, same across all frames)
+    int8_t anchor_x;
+    int8_t anchor_y;
+
+} troop_sprite_def_t;
 // Change to attack_target_type
 // typedef enum {TOWER, TROOP, BUILDING} projectile_target_type_t;
 typedef enum {AIR_MOVEMENT, GROUND_MOVEMENT, STATIONARY} movement_type_t;
@@ -61,6 +93,9 @@ typedef struct {
     gfx_sprite_t **backward_movement;
     gfx_sprite_t **attack_cycle;
     gfx_sprite_t **attack_cycle_rev;
+
+    // NEW: Unified sprite sheet system (optional - NULL if using old system)
+    const troop_sprite_def_t *sprite_def;
 
     // Projectile template (only sprite and speed needed)
     gfx_sprite_t *projectile_sprite;
@@ -128,6 +163,21 @@ typedef struct {
     // Make a structure that has cards and amount
 } chest_t;
 
+// Maximum different card types in a chest opening
+#define MAX_CHEST_CARD_TYPES 4
+
+// Structure to hold generated chest contents during opening sequence
+typedef struct {
+    unsigned int gold;
+    unsigned int num_card_types;
+    struct {
+        int card_index;      // Index into available_cards
+        unsigned int count;  // Number of this card type
+    } cards[MAX_CHEST_CARD_TYPES];
+    bool generated;
+    int opening_chest_index;  // Which chest slot (0-3) is being opened
+} chest_opening_state_t;
+
 typedef struct {
     // MEMORY OPTIMIZATION: Use indices instead of copying entire card structures  
     int *card_indices;     // Array of indices pointing to available_cards
@@ -173,6 +223,9 @@ typedef struct{
     gfx_sprite_t **attack_cycle;
     gfx_sprite_t **attack_cycle_rev;
     // gfx_sprite_t **projectile_sprites;
+
+    // NEW: Unified sprite sheet system (optional - NULL if using old system)
+    const troop_sprite_def_t *sprite_def;
 
     position_t position;
 
