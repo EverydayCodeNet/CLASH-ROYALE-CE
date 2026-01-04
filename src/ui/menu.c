@@ -36,6 +36,7 @@ static troop_sprite_def_t MINER_SPRITE_DEF = {
     .movement_count = 3,
     .movement_sequence = {1, 0, 1, 2},  // N, L, N, R
     .movement_sequence_len = 4,
+    .movement_weights = {0, 1, 0, 1},   // Move only when foot plants (L→N, R→N)
     .attack_start = 3,
     .attack_count = 2,
     .has_projectile = 0,
@@ -55,6 +56,7 @@ static troop_sprite_def_t MUSKETEER_SPRITE_DEF = {
     .movement_count = 3,
     .movement_sequence = {1, 0, 1, 2},  // N, L, N, R
     .movement_sequence_len = 4,
+    .movement_weights = {0, 1, 0, 1},   // Move only when foot plants (L→N, R→N)
     .attack_start = 3,
     .attack_count = 2,
     .has_projectile = 1,
@@ -74,6 +76,7 @@ static troop_sprite_def_t GIANT_SPRITE_DEF = {
     .movement_count = 3,
     .movement_sequence = {1, 0, 1, 2},  // N, L, N, R
     .movement_sequence_len = 4,
+    .movement_weights = {0, 1, 0, 1},   // Move only when foot plants (L→N, R→N)
     .attack_start = 3,
     .attack_count = 2,
     .has_projectile = 0,
@@ -93,6 +96,7 @@ static troop_sprite_def_t KNIGHT_SPRITE_DEF = {
     .movement_count = 3,
     .movement_sequence = {1, 0, 1, 2},  // N, L, N, R
     .movement_sequence_len = 4,
+    .movement_weights = {0, 1, 0, 1},   // Move only when foot plants (L→N, R→N)
     .attack_start = 3,
     .attack_count = 2,
     .has_projectile = 0,
@@ -1133,13 +1137,14 @@ void init_card(card_t *card, gfx_sprite_t *sprite, card_type_t type, rarity_t ra
     card->elixir = elixir;
 }
 
-void init_troop(card_t *troop, 
-                gfx_sprite_t **forward_movement, 
-                gfx_sprite_t **backward_movement, 
-                gfx_sprite_t **attack_cycle, 
-                gfx_sprite_t **attack_cycle_rev, 
+void init_troop(card_t *troop,
+                gfx_sprite_t **forward_movement,
+                gfx_sprite_t **backward_movement,
+                gfx_sprite_t **attack_cycle,
+                gfx_sprite_t **attack_cycle_rev,
                 unsigned int movement_steps,
-                unsigned int attack_steps) 
+                unsigned int attack_steps,
+                double movement_speed)
 {
     troop->forward_movement = forward_movement;
     troop->backward_movement = backward_movement;
@@ -1150,12 +1155,63 @@ void init_troop(card_t *troop,
 
     // Initialize new fields
     troop->movement_ticks = 0;
-    troop->movement_update_rate = 10; // Adjust this value to control movement speed
     troop->movement_frame = 0;
 
     troop->attack_ticks = 0;
     troop->attack_frame = 0;
     troop->attack_steps = attack_steps;
+
+    // Store movement speed for natural walk calculation
+    troop->movement_speed = movement_speed;
+    // Defaults - will be recalculated by calculate_natural_movement() after sprite_def is set
+    troop->step_size = 1.0;
+    troop->movement_update_rate = 10;
+}
+
+// Calculate step_size and movement_update_rate for natural walking animation
+// Call AFTER sprite_def is assigned to the card
+// Movement only happens on "plant" frames (weight > 0), not continuously
+#define BASE_STRIDE_TICKS 32  // Base ticks per full walk cycle at speed 1.0
+#define STRIDE_FRACTION 0.25  // Each step moves 25% of sprite width (realistic stride)
+
+void calculate_natural_movement(card_t *card) {
+    if (card->type != TROOP) return;
+
+    uint8_t frame_width;
+    uint8_t sequence_len;
+    uint8_t total_weight = 0;
+
+    if (card->sprite_def != NULL) {
+        frame_width = card->sprite_def->frame_width;
+        sequence_len = card->sprite_def->movement_sequence_len;
+        // Sum up all movement weights to know how many "steps" per cycle
+        for (int i = 0; i < sequence_len; i++) {
+            total_weight += card->sprite_def->movement_weights[i];
+        }
+    } else {
+        // Old sprite system - use reasonable defaults (continuous movement)
+        frame_width = 30;
+        sequence_len = card->movement_steps > 0 ? card->movement_steps : 3;
+        total_weight = sequence_len;  // Every frame moves equally
+    }
+
+    // Prevent division by zero
+    if (sequence_len == 0) sequence_len = 1;
+    if (total_weight == 0) total_weight = 1;
+    double speed = card->movement_speed > 0 ? card->movement_speed : 1.0;
+
+    // Faster troops complete strides in fewer ticks
+    unsigned int ticks_per_stride = (unsigned int)(BASE_STRIDE_TICKS / speed);
+    if (ticks_per_stride < 4) ticks_per_stride = 4;  // Minimum for smooth animation
+
+    // Calculate animation rate (ticks per frame change)
+    card->movement_update_rate = ticks_per_stride / sequence_len;
+    if (card->movement_update_rate < 1) card->movement_update_rate = 1;
+
+    // Calculate step size: each step moves STRIDE_FRACTION of sprite width
+    // Divided among weighted frames per cycle
+    // e.g., 45px sprite * 0.25 = 11.25px per cycle, / 2 steps = ~5.6px per step
+    card->step_size = (double)frame_width * STRIDE_FRACTION / (double)total_weight;
 }
 
 // // card, sprite, radius, duration, elixir generated
@@ -1295,18 +1351,27 @@ void init_deck(data_t *data) {
 
     // Initialize troops - sprite sheet troops use NULL for old arrays
     // Miner, Musketeer, Giant, Knight use new sprite sheet system (sprite_def)
-    init_troop(&available_cards[0], NULL, NULL, NULL, NULL, 2, 2);  // Miner
-    init_troop(&available_cards[1], NULL, NULL, NULL, NULL, 4, 2);  // Musketeer
-    init_troop(&available_cards[2], balloon_movement, balloon_movement_rev, balloon_attack, balloon_attack_rev, 1, 1);  // Balloon (old system)
-    init_troop(&available_cards[3], NULL, NULL, NULL, NULL, 4, 2);  // Giant
-    init_troop(&available_cards[7], NULL, NULL, NULL, NULL, 4, 2);  // Knight
+    // Movement speed: 1.0 = medium, >1.0 = fast, <1.0 = slow
+    init_troop(&available_cards[0], NULL, NULL, NULL, NULL, 2, 2, 6);  // Miner (fast)
+    init_troop(&available_cards[1], NULL, NULL, NULL, NULL, 4, 2, 6);  // Musketeer (medium)
+    init_troop(&available_cards[2], balloon_movement, balloon_movement_rev, balloon_attack, balloon_attack_rev, 1, 1, 1);  // Balloon (slow)
+    init_troop(&available_cards[3], NULL, NULL, NULL, NULL, 4, 2, 5);  // Giant (slow)
+    init_troop(&available_cards[7], NULL, NULL, NULL, NULL, 4, 2, 5);  // Knight (medium)
+
+    // Calculate natural movement parameters based on sprite size and speed
+    // Must be called after sprite_def is assigned
+    calculate_natural_movement(&available_cards[0]);  // Miner
+    calculate_natural_movement(&available_cards[1]);  // Musketeer
+    calculate_natural_movement(&available_cards[2]);  // Balloon
+    calculate_natural_movement(&available_cards[3]);  // Giant
+    calculate_natural_movement(&available_cards[7]);  // Knight
 
     // Attack type, speed, damage, range (tiles)
-    set_attack_vars(&available_cards[0], MELEE, 1, 50, 1);      // Miner
-    set_attack_vars(&available_cards[1], RANGED, 1, 50, 5);     // Musketeer
-    set_attack_vars(&available_cards[2], MELEE, 1, 100, 0.5);   // Balloon
-    set_attack_vars(&available_cards[3], MELEE, 1, 150, 1);     // Giant
-    set_attack_vars(&available_cards[7], MELEE, 1, 25, 0.5);    // Knight
+    set_attack_vars(&available_cards[0], MELEE, 20, 1, 1);      // Miner
+    set_attack_vars(&available_cards[1], RANGED, 10, 1, 5);     // Musketeer
+    set_attack_vars(&available_cards[2], MELEE, 10, 1, 0.5);   // Balloon
+    set_attack_vars(&available_cards[3], MELEE, 25, 1, 1);     // Giant
+    set_attack_vars(&available_cards[7], MELEE, 10, 1, 0.5);    // Knight
 
     // set_attack_speed;
     // set_damage()

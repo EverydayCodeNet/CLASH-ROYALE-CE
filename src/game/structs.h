@@ -25,6 +25,7 @@ typedef struct {
     uint8_t movement_count;           // Number of unique movement frames
     uint8_t movement_sequence[8];     // Frame order (e.g., {1,0,1,2} for N-L-N-R)
     uint8_t movement_sequence_len;    // Length of sequence
+    uint8_t movement_weights[8];      // Movement weight per frame (0=no move, 1=full step)
 
     // Attack animation
     uint8_t attack_start;             // First attack frame index
@@ -110,6 +111,10 @@ typedef struct {
     unsigned int attack_speed;
     unsigned int movement_update_rate;
     unsigned int damage;
+
+    // Movement: speed multiplier (1.0 = normal) and pre-calculated step size
+    double movement_speed;
+    double step_size;
 
     double radius;
 

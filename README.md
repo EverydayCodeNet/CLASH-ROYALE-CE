@@ -3,7 +3,7 @@ Clash Royale remake for the TI-84 Plus CE calculator.
 
 ## Features
 ### Gameplay
-The game features a 90-second match against a computer opponent.
+The game features a 120-second match against a computer opponent.
 
 ### Reward System
 Players can earn Silver, Gold, or Magical chests by winning matches.

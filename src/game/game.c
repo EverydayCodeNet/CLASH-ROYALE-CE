@@ -28,7 +28,7 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 // M_PI is already defined in math.h
-#define GAME_DURATION 120
+#define GAME_DURATION 180
 #define SCREEN_WIDTH 240
 #define SCREEN_HEIGHT 320
 #define TILE_SIZE 10
@@ -626,10 +626,17 @@ void place_card(player_t *player, card_t *card, cursor_t cursor, void **list) {
         troop->path = NULL;
         troop->current_waypoint = NULL;
 
-        // You might want to set these based on the card or game logic
-        troop->angle = 0; // or set based on player's side
-        troop->step_size = 2.0; // Fast, smooth movement (moves every tick now!)
-        troop->attack_speed = 100; // or set based on card properties
+        // Movement parameters - use pre-calculated values from card data
+        troop->angle = 0;
+        troop->movement_speed = card->movement_speed;
+
+        // Air troops move every tick, so need small step_size for smooth movement
+        // Ground troops use pre-calculated step_size for natural walking
+        if (card->movement == AIR_MOVEMENT) {
+            troop->step_size = card->movement_speed;  // ~0.6-1.5 pixels per tick
+        } else {
+            troop->step_size = card->step_size;
+        }
 
         // Add to the front of the list (troop's next points to current head)
         troop->next = *list;
@@ -1211,11 +1218,13 @@ void update_troops(game_t *game) {
 
             // If no nearby troop or troop doesn't target troops, check for tower in range
             if (!in_attack_range) {
-                if (current_troop->nearest_tower == NULL) {
+                // Check if cached tower is still alive, retarget if dead
+                tower_t *cached_tower = (tower_t *)current_troop->nearest_tower;
+                if (cached_tower == NULL || !cached_tower->active) {
                     current_troop->nearest_tower = find_nearest_tower(opponent->towers, current_troop->position);
                 }
                 tower_t *nearest_tower = (tower_t *)current_troop->nearest_tower;
-                if (nearest_tower != NULL) {
+                if (nearest_tower != NULL && nearest_tower->active) {
                     // Calculate tower FACING EDGE for range check
                     // Player troops (is_opponent[i]=false) target LEFT edge of opponent towers
                     // Opponent troops (is_opponent[i]=true) target RIGHT edge of player towers
@@ -1240,14 +1249,25 @@ void update_troops(game_t *game) {
             }
 
             if (in_attack_range) {
-                // Attack logic
+                // Attack animation timing:
+                // - Frame 0 (wind-up): Waiting to attack, charging up
+                // - Frame 1 (strike): Contact/damage frame
+                // Strike duration is 20% of attack cycle
+                #define STRIKE_DURATION_PERCENT 20
+                unsigned int strike_duration = (current_troop->attack_speed * STRIKE_DURATION_PERCENT) / 100;
+                if (strike_duration < 1) strike_duration = 1;
+
                 current_troop->attack_ticks++;
-                if (current_troop->attack_ticks % current_troop->attack_speed == 0) {
+
+                // Check if we've reached the attack moment (end of wind-up)
+                if (current_troop->attack_ticks == current_troop->attack_speed) {
+                    // Enter strike frame and deal damage
+                    current_troop->attack_frame = 1;
+
                     if (current_troop->attack_type == MELEE) {
-                        // Perform melee attack
                         apply_damage(target, target_type, current_troop->damage);
                     } else if (current_troop->attack_type == RANGED) {
-                       projectile_t *new_projectile = CR_MALLOC(sizeof(projectile_t));
+                        projectile_t *new_projectile = CR_MALLOC(sizeof(projectile_t));
 
                         *new_projectile = (projectile_t) {
                             .sprite = current_troop->projectile_sprite,
@@ -1265,7 +1285,6 @@ void update_troops(game_t *game) {
                         if (target_type == TROOP) {
                             target_pos = ((troop_t*)target)->position;
                         } else {
-                            // Tower - use center
                             tower_t *t = (tower_t*)target;
                             int t_idx = t - opponent->towers;
                             int t_size = (t_idx == 2) ? 60 : 50;
@@ -1275,10 +1294,9 @@ void update_troops(game_t *game) {
                         double dx = target_pos.x - current_troop->position.x;
                         double dy = target_pos.y - current_troop->position.y;
                         double angle_deg = atan2(dy, dx) * 180.0 / M_PI;
-                        if (angle_deg < 0) angle_deg += 360.0;  // Normalize to 0-360
+                        if (angle_deg < 0) angle_deg += 360.0;
                         new_projectile->angle = (unsigned int)angle_deg;
 
-                        // Add the projectile to the player's projectile list
                         if (players[i]->projectiles == NULL) {
                             players[i]->projectiles = new_projectile;
                         } else {
@@ -1287,9 +1305,15 @@ void update_troops(game_t *game) {
                             players[i]->projectiles = new_projectile;
                         }
                     }
+                } else if (current_troop->attack_ticks > current_troop->attack_speed + strike_duration) {
+                    // Strike duration over, reset to wind-up
+                    current_troop->attack_ticks = 0;
+                    current_troop->attack_frame = 0;
+                } else if (current_troop->attack_ticks < current_troop->attack_speed) {
+                    // Still in wind-up phase
+                    current_troop->attack_frame = 0;
                 }
-                // Update attack sprite
-                current_troop->attack_frame = (current_troop->attack_ticks / current_troop->attack_speed) % current_troop->attack_steps;
+                // else: still in strike phase, keep frame 1
 
                 // Only update sprite pointer for old system
                 if (current_troop->sprite_def == NULL) {
@@ -1301,26 +1325,48 @@ void update_troops(game_t *game) {
                 // Reset movement ticks when switching to attack mode
                 current_troop->movement_ticks = 0;
             } else {
-                // Movement logic with pathfinding - SMOOTH: Move every tick!
-                // Use new pathfinding system
-                move_troop_with_pathfinding(current_troop, players[i], opponent);
+                // Air troops (balloon, etc.) move continuously every tick
+                if (current_troop->movement == AIR_MOVEMENT) {
+                    move_troop_with_pathfinding(current_troop, players[i], opponent);
 
-                // Update movement sprite animation (slower than movement)
-                current_troop->movement_ticks++;
-                if (current_troop->movement_ticks >= current_troop->movement_update_rate) {
-                    current_troop->movement_ticks = 0;
+                    // Update animation frame at slower rate (cosmetic only)
+                    current_troop->movement_ticks++;
+                    if (current_troop->movement_ticks >= current_troop->movement_update_rate) {
+                        current_troop->movement_ticks = 0;
+                        if (current_troop->movement_steps > 0) {
+                            current_troop->movement_frame = (current_troop->movement_frame + 1) % current_troop->movement_steps;
+                            current_troop->sprite = is_opponent[i] ?
+                                current_troop->backward_movement[current_troop->movement_frame] :
+                                current_troop->forward_movement[current_troop->movement_frame];
+                        }
+                    }
+                } else {
+                    // Ground troops - movement synced to animation frames
+                    current_troop->movement_ticks++;
+                    if (current_troop->movement_ticks >= current_troop->movement_update_rate) {
+                        current_troop->movement_ticks = 0;
 
-                    // Update movement frame
-                    if (current_troop->sprite_def != NULL) {
-                        // New system: cycle through movement_sequence_len
-                        current_troop->movement_frame = (current_troop->movement_frame + 1) %
-                            current_troop->sprite_def->movement_sequence_len;
-                    } else {
-                        // Old system
-                        current_troop->movement_frame = (current_troop->movement_frame + 1) % current_troop->movement_steps;
-                        current_troop->sprite = is_opponent[i] ?
-                            current_troop->backward_movement[current_troop->movement_frame] :
-                            current_troop->forward_movement[current_troop->movement_frame];
+                        // Advance to next animation frame
+                        if (current_troop->sprite_def != NULL) {
+                            // New system: cycle through movement_sequence_len
+                            current_troop->movement_frame = (current_troop->movement_frame + 1) %
+                                current_troop->sprite_def->movement_sequence_len;
+
+                            // Only move if this frame has weight (foot planting)
+                            uint8_t weight = current_troop->sprite_def->movement_weights[current_troop->movement_frame];
+                            if (weight > 0) {
+                                for (uint8_t w = 0; w < weight; w++) {
+                                    move_troop_with_pathfinding(current_troop, players[i], opponent);
+                                }
+                            }
+                        } else {
+                            // Old ground system - move every animation frame
+                            current_troop->movement_frame = (current_troop->movement_frame + 1) % current_troop->movement_steps;
+                            current_troop->sprite = is_opponent[i] ?
+                                current_troop->backward_movement[current_troop->movement_frame] :
+                                current_troop->forward_movement[current_troop->movement_frame];
+                            move_troop_with_pathfinding(current_troop, players[i], opponent);
+                        }
                     }
                 }
 
@@ -1872,9 +1918,10 @@ void apply_game_result(data_t *data, game_result_t *result) {
     if (new_trophies < 0) new_trophies = 0;
     data->trophies = (unsigned int)new_trophies;
 
-    // Award chest if victory
+    // Award chest if victory - only mark as given if slot was available
+    bool chest_actually_given = false;
     if (result->chest_given) {
-        award_chest(data, result->chest_awarded);
+        chest_actually_given = award_chest(data, result->chest_awarded);
     }
 
     // Store result for display on battle_results screen
@@ -1884,7 +1931,7 @@ void apply_game_result(data_t *data, game_result_t *result) {
     data->last_opponent_crowns = result->opponent_crowns;
     data->last_trophy_change = result->trophy_change;
     data->last_chest_awarded = result->chest_awarded;
-    data->last_chest_given = result->chest_given;
+    data->last_chest_given = chest_actually_given;  // Only true if chest was actually awarded
 }
 
 void start_game(void *args) {
