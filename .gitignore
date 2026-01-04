@@ -11,7 +11,12 @@
 *.out
 src/gfx/*.c
 src/gfx/*.h
+src/cards/troops/giant/upscale/
 makefile
 /planning/
-.psd
 nul
+
+# Asset files
+*.psd
+*.png
+*.md
