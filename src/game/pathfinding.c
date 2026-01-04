@@ -46,12 +46,21 @@ void* find_nearest_building_or_tower(position_t pos, player_t *opponent) {
     void *nearest = NULL;
     double min_dist_sq = 999999.0;  // Use squared distance to avoid sqrt
 
-    // Check towers
-    tower_t *current_tower = opponent->towers;
-    while (current_tower != NULL) {
+    // Tower sizes for center calculation
+    const int PRINCESS_TOWER_SIZE = 50;
+    const int KING_TOWER_SIZE = 60;
+
+    // Check towers (array of 3)
+    for (int i = 0; i < 3; i++) {
+        tower_t *current_tower = &opponent->towers[i];
         if (current_tower->active) {
-            double dx = current_tower->position.x - pos.x;
-            double dy = current_tower->position.y - pos.y;
+            // Use tower CENTER for distance calculation
+            int tower_size = (i == 2) ? KING_TOWER_SIZE : PRINCESS_TOWER_SIZE;
+            double tower_center_x = current_tower->position.x + (tower_size / 2);
+            double tower_center_y = current_tower->position.y + (tower_size / 2);
+
+            double dx = tower_center_x - pos.x;
+            double dy = tower_center_y - pos.y;
             double dist_sq = dx * dx + dy * dy;
 
             if (dist_sq < min_dist_sq) {
@@ -59,16 +68,15 @@ void* find_nearest_building_or_tower(position_t pos, player_t *opponent) {
                 nearest = current_tower;
             }
         }
-        current_tower = (tower_t*)current_tower + 1;
-        // Break after 3 towers
-        if (current_tower - opponent->towers >= 3) break;
     }
 
-    // Check buildings
+    // Check buildings - use center approximation
     building_t *current_building = opponent->buildings;
     while (current_building != NULL) {
-        double dx = current_building->position.x - pos.x;
-        double dy = current_building->position.y - pos.y;
+        double building_center_x = current_building->position.x + 15;
+        double building_center_y = current_building->position.y + 15;
+        double dx = building_center_x - pos.x;
+        double dy = building_center_y - pos.y;
         double dist_sq = dx * dx + dy * dy;
 
         if (dist_sq < min_dist_sq) {
@@ -218,17 +226,38 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
 
     if (target == NULL) return;
 
-    // Determine target position
+    // Determine target position - use the FACING EDGE of target
+    // Player troops (on left) walk right -> target LEFT edge of opponent towers
+    // Opponent troops (on right) walk left -> target RIGHT edge of player towers
     position_t target_pos;
 
+    // Tower dimensions
+    const int PRINCESS_TOWER_SIZE = 50;
+    const int KING_TOWER_SIZE = 60;
+
+    // Determine if this troop belongs to player or opponent
+    // Player troops are on left side (x < 180), opponent on right (x > 180)
+    bool troop_is_on_left = (my_player->opponent == false);
+
     // Try to determine what type of target this is
-    // This is a bit hacky but works for now
     // Check if it's in the opponent's tower array
     bool is_tower = false;
     for (int i = 0; i < 3; i++) {
         if (target == &opponent->towers[i]) {
             is_tower = true;
-            target_pos = ((tower_t*)target)->position;
+            tower_t *tower = (tower_t*)target;
+            int tower_size = (i == 2) ? KING_TOWER_SIZE : PRINCESS_TOWER_SIZE;
+
+            // Target the FACING edge of the tower
+            if (troop_is_on_left) {
+                // Player troop walking right -> target LEFT edge of opponent tower
+                target_pos.x = tower->position.x;
+            } else {
+                // Opponent troop walking left -> target RIGHT edge of player tower
+                target_pos.x = tower->position.x + tower_size;
+            }
+            // Y is always the midpoint
+            target_pos.y = tower->position.y + (tower_size / 2);
             break;
         }
     }
@@ -240,13 +269,19 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
         while (check_building != NULL) {
             if (target == check_building) {
                 is_building = true;
-                target_pos = check_building->position;
+                // Target building facing edge (approximate 30px width)
+                if (troop_is_on_left) {
+                    target_pos.x = check_building->position.x;
+                } else {
+                    target_pos.x = check_building->position.x + 30;
+                }
+                target_pos.y = check_building->position.y + 15;
                 break;
             }
             check_building = check_building->next;
         }
 
-        // Otherwise assume it's a troop
+        // Otherwise assume it's a troop - position is already anchor point
         if (!is_building) {
             target_pos = ((troop_t*)target)->position;
         }
@@ -265,11 +300,9 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
 
     // GROUND TROOPS: Must use bridges to cross river
     if (troop->movement == GROUND_MOVEMENT) {
-        // Calculate anchor position (where the feet are)
-        position_t anchor_pos = {
-            troop->position.x + troop->anchor_x,
-            troop->position.y + ( troop->anchor_y)
-        };
+        // troop->position IS the anchor point (feet position)
+        // No need to add anchor offset again
+        position_t anchor_pos = troop->position;
 
         // Check if we need to cross the river (using anchor position)
         if (needs_to_cross_river(anchor_pos, target_pos)) {

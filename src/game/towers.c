@@ -16,8 +16,7 @@
 #define PRINCESS_TOWER_MAX_HEALTH 3000
 #define KING_TOWER_MAX_HEALTH 5000
 
-tower_t *create_tower(int x, int y, bool active, gfx_sprite_t *sprite) {
-    tower_t *tower = CR_MALLOC(sizeof(tower_t));
+void init_tower(tower_t *tower, int x, int y, bool active, gfx_sprite_t *sprite) {
     tower->position.x = x;
     tower->position.y = y;
     tower->sprite = sprite;
@@ -29,8 +28,8 @@ tower_t *create_tower(int x, int y, bool active, gfx_sprite_t *sprite) {
         tower->damage = 100;
         tower->attack_speed = 10;
         tower->attack_ticks = 0;
-        tower->projectile_sprite = arrow;
-        tower->projectile_speed = 1;
+        tower->projectile_sprite = arrow;  // Changed from arrow to bullet for testing
+        tower->projectile_speed = 3;
         tower->MAX_HEALTH = PRINCESS_TOWER_MAX_HEALTH;
     } else {
         tower->active = false;
@@ -39,25 +38,23 @@ tower_t *create_tower(int x, int y, bool active, gfx_sprite_t *sprite) {
         tower->attack_speed = 25;
         tower->attack_ticks = 0;
         tower->projectile_sprite = bullet;
-        tower->projectile_speed = 1;
+        tower->projectile_speed = 3;
         tower->MAX_HEALTH = KING_TOWER_MAX_HEALTH;
     }
 
     tower->health = tower->MAX_HEALTH;
-
-    return tower;
 }
 
 void init_towers(game_t *game) {
     tower_t *towers = CR_MALLOC(sizeof(tower_t) * NUM_TOWERS);
-    towers[0] = *create_tower(90, 40, true, princess_tower);
-    towers[1] = *create_tower(90, 170, true, princess_tower);
-    towers[2] = *create_tower(50, 100, false, king_tower);
+    init_tower(&towers[0], 90, 40, true, princess_tower);
+    init_tower(&towers[1], 90, 170, true, princess_tower);
+    init_tower(&towers[2], 50, 100, false, king_tower);
 
     tower_t *opponent_towers = CR_MALLOC(sizeof(tower_t) * NUM_TOWERS);
-    opponent_towers[0] = *create_tower(230, 40, true, princess_tower_opponent);
-    opponent_towers[1] = *create_tower(230, 170, true, princess_tower_opponent);
-    opponent_towers[2] = *create_tower(260, 100, false, king_tower_opponent);
+    init_tower(&opponent_towers[0], 230, 40, true, princess_tower_opponent);
+    init_tower(&opponent_towers[1], 230, 170, true, princess_tower_opponent);
+    init_tower(&opponent_towers[2], 260, 100, false, king_tower_opponent);
 
     game->player->towers = towers;
     game->opponent->towers = opponent_towers;

@@ -15,6 +15,7 @@ player_t *init_player(bool opponent, card_t *deck) {
     player->troops = NULL;
     player->spells = NULL;
     player->buildings = NULL;
+    player->projectiles = NULL;
     player->deck = CR_MALLOC(sizeof(deck_t));
     // MEMORY OPTIMIZATION: Allocate indices array instead of copying cards
     player->deck->card_indices = CR_MALLOC(sizeof(int) * 8);  // 8 card deck
@@ -32,6 +33,7 @@ player_t *init_player(bool opponent, card_t *deck) {
     player->cursor.x = x;
     player->cursor.y = y;
     player->towers_destroyed = 0;
+    player->crowns = 0;
     player->opponent = opponent;
     // init_towers(opponent);
     // init_bounds();

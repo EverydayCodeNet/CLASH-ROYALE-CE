@@ -1,6 +1,5 @@
 #include "troops.h"
 #include "structs.h"
-#include "../gfx/gfx.h"
 
 void update_miner_movement(troop_t *miner, position_t target) {
     if (miner == NULL) return;
@@ -23,6 +22,8 @@ void update_miner_movement(troop_t *miner, position_t target) {
 }
 
 bool is_miner_underground(troop_t *troop) {
-    // Miner is underground until it reaches target position
-    return (troop->sprite == miner_stepL && troop->movement_ticks < 60);
+    // Miner is underground during initial spawn animation
+    // With sprite sheet system, we can't check specific sprite pointer
+    // Just use movement_ticks as the indicator
+    return (troop->movement_ticks < 60);
 }

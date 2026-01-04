@@ -10,6 +10,7 @@
 #include <fontlibc.h>
 #include <keypadc.h>
 #include <limits.h>
+#include <sys/util.h>
 
 #include "game.h"
 #include "map.h"
@@ -18,6 +19,7 @@
 #include "cards.h"
 #include "projectiles.h"
 #include "pathfinding.h"
+#include "sprite_system.h"
 #include "../ui/menu.h"
 #include "/gfx/gfx.h"
 #include "player.h"
@@ -26,7 +28,7 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 // M_PI is already defined in math.h
-#define GAME_DURATION 90
+#define GAME_DURATION 120
 #define SCREEN_WIDTH 240
 #define SCREEN_HEIGHT 320
 #define TILE_SIZE 10
@@ -39,7 +41,8 @@ const int RIVER_X = (TILE_SIZE * 18);
 int num_projectiles = 0;
 
 bool is_out_of_bounds(position_t pos) {
-    return pos.x < 0 || pos.x >= SCREEN_WIDTH || pos.y < 0 || pos.y >= SCREEN_HEIGHT;
+    // Use actual LCD dimensions (320x240), not the swapped constants
+    return pos.x < 0 || pos.x >= 320 || pos.y < 0 || pos.y >= 240;
 }
 
 void draw_placement_bounds(player_t *player, card_t *selected_card, tower_t *enemy_towers) {
@@ -383,32 +386,32 @@ void draw_timer(game_t *game) {
 
 void draw_cursor(player_t *player) {
     int selected = player->deck->selected_card;
-    
+
     if (selected != -1) {
         card_t *card = get_card_by_index(player, selected);
         cursor_t cursor = card->cursor;
 
-        // NEW: Draw placement bounds
-        // Assuming we need access to opponent towers - pass from game context
-        // This will be called from run_game with game->opponent->towers
-        
         gfx_PrintStringXY("Cursor X: ", 10, 10);
         gfx_PrintInt(player->cursor.x, 1);
         gfx_PrintStringXY("Cursor Y: ", 10, 20);
         gfx_PrintInt(player->cursor.y, 1);
-        
-        if (cursor.sprite != NULL) {
+
+        // Draw cursor: sprite sheet > cursor sprite > circle fallback
+        if (card->sprite_def != NULL) {
+            // Use sprite sheet - draw neutral standing frame
+            draw_troop_frame(card->sprite_def, false, 1, player->cursor.x, player->cursor.y);
+        } else if (cursor.sprite != NULL) {
             gfx_TransparentSprite(card->cursor.sprite, player->cursor.x, player->cursor.y);
-        } else {    
+        } else {
             gfx_SetColor(card->color);
             gfx_Circle(player->cursor.x, player->cursor.y, card->radius * TILE_SIZE);
-        }            
+        }
     }
 }
 
 void draw_cursor_with_bounds(player_t *player, tower_t *enemy_towers) {
     int selected = player->deck->selected_card;
-    
+
     if (selected != -1) {
         card_t *card = get_card_by_index(player, selected);
         cursor_t cursor = card->cursor;
@@ -420,13 +423,17 @@ void draw_cursor_with_bounds(player_t *player, tower_t *enemy_towers) {
         gfx_PrintInt(player->cursor.x, 1);
         gfx_PrintStringXY("Cursor Y: ", 10, 20);
         gfx_PrintInt(player->cursor.y, 1);
-        
-        if (cursor.sprite != NULL) {
+
+        // Draw cursor: sprite sheet > cursor sprite > circle fallback
+        if (card->sprite_def != NULL) {
+            // Use sprite sheet - draw neutral standing frame
+            draw_troop_frame(card->sprite_def, false, 1, player->cursor.x, player->cursor.y);
+        } else if (cursor.sprite != NULL) {
             gfx_TransparentSprite(card->cursor.sprite, player->cursor.x, player->cursor.y);
-        } else {    
+        } else {
             gfx_SetColor(card->color);
             gfx_Circle(player->cursor.x, player->cursor.y, card->radius * TILE_SIZE);
-        }            
+        }
     }
 }
 
@@ -459,13 +466,12 @@ void draw_elixir_counter(player_t *player, card_t *selected_card) {
 
 void draw_card_carousel(player_t *player) {
     deck_t *deck = player->deck;
-    // card_t *selected_card = deck->cards[selected_card];
     card_t *selected_card = NULL;
 
     if (deck->selected_card != -1) {
         selected_card = get_card_by_index(player, deck->selected_card);
     }
- 
+
     const int CARD_WIDTH = 30;
     const int CARD_HEIGHT = 40;
 
@@ -477,20 +483,21 @@ void draw_card_carousel(player_t *player) {
     for (int i = 0; i < NUM_AVAILABLE; i++) {
         card_t *card_data = get_card_by_index(player, i);
         gfx_sprite_t *card = card_data->sprite;
-        
+
         y = 75 + i * CARD_HEIGHT;
         gfx_SetColor(255);
-        // darker - when card slot is empty
-        gfx_FillRectangle(20,75 + i * CARD_HEIGHT, CARD_HEIGHT, CARD_WIDTH);
-        // Figure out why card isn't being initialized
-        gfx_TransparentSprite(card,20,75 + i * 40);
+        gfx_FillRectangle(20, y, CARD_HEIGHT, CARD_WIDTH);
 
-        // change outline color based on the card selected
+        // Draw card sprite (the card image, not the troop sprite)
+        if (card != NULL) {
+            gfx_TransparentSprite(card, 20, y);
+        }
+
+        // Change outline color based on the card selected
         gfx_SetColor(0);
         if (i == deck->selected_card) gfx_SetColor(171);
-        
-        // remove 10
-        gfx_Rectangle(20,75 + i * CARD_HEIGHT,CARD_HEIGHT,CARD_WIDTH);   
+
+        gfx_Rectangle(20, y, CARD_HEIGHT, CARD_WIDTH);
     }
 
     draw_elixir_counter(player, selected_card);
@@ -559,8 +566,15 @@ void place_card(player_t *player, card_t *card, cursor_t cursor, void **list) {
     card_type_t card_type = card->type;
 
     position_t position;
-    position.x = cursor.x;
-    position.y = cursor.y;
+    // Cursor is top-left of sprite, but troop position stores anchor point (feet)
+    // Add anchor offset so troop appears where cursor was drawn
+    if (card->sprite_def != NULL) {
+        position.x = cursor.x + card->sprite_def->anchor_x;
+        position.y = cursor.y + card->sprite_def->anchor_y;
+    } else {
+        position.x = cursor.x + card->anchor_x;
+        position.y = cursor.y + card->anchor_y;
+    }
 
     if (card_type == TROOP) {
         troop_t *troop = CR_MALLOC(sizeof(troop_t));
@@ -568,13 +582,21 @@ void place_card(player_t *player, card_t *card, cursor_t cursor, void **list) {
             return;
         }
         // Transfer all relevant properties from card to troop
-        troop->sprite = player->opponent ? card->backward_movement[0] : card->forward_movement[0];
+        troop->sprite_def = card->sprite_def;  // NEW: Copy sprite sheet definition
+
+        // Set initial sprite (use old system if sprite_def is NULL)
+        if (card->sprite_def != NULL) {
+            troop->sprite = NULL;  // Not used with new system
+        } else {
+            troop->sprite = player->opponent ? card->backward_movement[0] : card->forward_movement[0];
+        }
         troop->forward_movement = card->forward_movement;
         troop->backward_movement = card->backward_movement;
         troop->attack_cycle = card->attack_cycle;
         troop->attack_cycle_rev = card->attack_cycle_rev;
         troop->movement_steps = card->movement_steps;
         troop->health = card->health;
+        troop->MAX_HEALTH = card->health;  // Store initial health as max
         troop->movement_ticks = 0;
         troop->movement_update_rate = card->movement_update_rate;
         troop->movement_frame = 0;
@@ -785,23 +807,58 @@ void get_troop_priority(troop_t *troops, troop_t *nearest_troop, troop_t *strong
 }
 
 void handle_ai(game_t *game) {
-    // Give the AI all of the game state information (except player's elixir)
-    // Reach: Understand the current hand of the opponent (cycles), what's currently in hand
-    // Use currently placed troops, tower health, etc. to weight judgement
-    player_t *player = game->player;
+    // Simple AI: randomly select and place cards when elixir is available
     player_t *opponent = game->opponent;
 
-    tower_t *towers = player->towers;
-    tower_t *opponent_towers = opponent->towers;
+    // Select a random card if none selected
+    if (opponent->deck->selected_card == -1) {
+        opponent->deck->selected_card = randInt(0, 3);
+    }
 
-    // Find nearest and or strongest troops - confine to one traversal of troops list
-    // Determine strength of troop by DPS / (health / max health)
+    int selected = opponent->deck->selected_card;
+    card_t *card = get_card_by_index(opponent, selected);
 
-    // Find x number of troops from each flag
-    troop_t *nearest_troop;
-    troop_t *strongest_troop;
-    get_troop_priority(player->troops, nearest_troop, strongest_troop);
-    
+    if (card == NULL) {
+        opponent->deck->selected_card = -1;
+        return;
+    }
+
+    // Check if AI has enough elixir
+    if (opponent->elixir >= card->elixir) {
+        // Set cursor position based on card type
+        // Opponent places on RIGHT side of map (x: 200-280)
+        if (card->type == TROOP) {
+            // Place troops in opponent's territory (right side)
+            opponent->cursor.x = randInt(210, 280);
+            opponent->cursor.y = randInt(50, 190);
+        } else if (card->type == SPELL) {
+            // Target player's side with spells (left side where player troops are)
+            opponent->cursor.x = randInt(80, 150);
+            // Randomly target top or bottom lane
+            if (randInt(0, 1) == 1) {
+                opponent->cursor.y = randInt(50, 100);
+            } else {
+                opponent->cursor.y = randInt(140, 190);
+            }
+        } else if (card->type == BUILDING) {
+            // Place buildings in opponent's territory
+            opponent->cursor.x = randInt(220, 280);
+            opponent->cursor.y = randInt(80, 160);
+        }
+
+        // Place the card
+        if (card->type == TROOP) {
+            place_card(opponent, card, opponent->cursor, (void **)&opponent->troops);
+        } else if (card->type == BUILDING) {
+            place_card(opponent, card, opponent->cursor, (void **)&opponent->buildings);
+        } else if (card->type == SPELL) {
+            place_card(opponent, card, opponent->cursor, (void **)&opponent->spells);
+        }
+
+        // Rotate deck and reset selection
+        shift_deck_indices(opponent->deck->card_indices, selected);
+        opponent->deck->selected_card = -1;
+    }
 }
 
 void handle_players(game_t *game) {
@@ -887,28 +944,92 @@ void create_projectile(player_t *player, projectile_t *template) {
 }
 
 void draw_troops(game_t *game) {
-    troop_t *current_troop;
+    player_t *players[] = {game->player, game->opponent};
+    bool is_opponent[] = {false, true};
 
-    // Draw player troops
-    current_troop = game->player->troops;
-    
-    // array of troops should be sorted by z index, put flying troops above (AKA end of the array)
-    while (current_troop != NULL) {
-        // Sprite should store the current movement/attack animation from the sequence
-        if (current_troop->sprite != NULL) {
-            gfx_TransparentSprite(current_troop->sprite, current_troop->position.x, current_troop->position.y);
+    for (int i = 0; i < 2; i++) {
+        troop_t *current_troop = players[i]->troops;
+
+        while (current_troop != NULL) {
+            // Check if troop uses new sprite sheet system
+            if (current_troop->sprite_def != NULL) {
+                // Use new sprite sheet system
+                // facing_down = opponent troops face down (toward player)
+                bool facing_down = is_opponent[i];
+
+                // Calculate draw position using anchor point
+                // For up-facing sprites: anchor is near bottom (feet)
+                // For down-facing sprites: feet are at top, so anchor flips
+                int draw_x = current_troop->position.x - current_troop->sprite_def->anchor_x;
+                int draw_y;
+                if (facing_down) {
+                    // Down-facing: anchor_y is from bottom instead of top
+                    draw_y = current_troop->position.y - (current_troop->sprite_def->frame_height - current_troop->sprite_def->anchor_y);
+                } else {
+                    draw_y = current_troop->position.y - current_troop->sprite_def->anchor_y;
+                }
+
+                // Check if attacking (attack_ticks > 0 means currently in attack mode)
+                if (current_troop->attack_ticks > 0) {
+                    draw_troop_attack(current_troop->sprite_def, facing_down,
+                                     current_troop->attack_frame, draw_x, draw_y);
+                } else {
+                    draw_troop_movement(current_troop->sprite_def, facing_down,
+                                       current_troop->movement_frame, draw_x, draw_y);
+                }
+
+                // Draw healthbar if troop is damaged (new sprite system)
+                if (current_troop->health < (int)current_troop->MAX_HEALTH && current_troop->health > 0) {
+                    int bar_width = 5;
+                    int bar_height = current_troop->sprite_def->frame_height;
+                    int bar_x = draw_x + current_troop->sprite_def->frame_width;
+                    int bar_y = draw_y;
+
+                    // Background (grey)
+                    gfx_SetColor(136);
+                    gfx_FillRectangle(bar_x, bar_y, bar_width, bar_height);
+
+                    // Health fill (blue for player, red for opponent) - fills from top down
+                    gfx_SetColor(is_opponent[i] ? 150 : 151);
+                    int health_height = (bar_height * current_troop->health) / current_troop->MAX_HEALTH;
+                    gfx_FillRectangle(bar_x, bar_y, bar_width, health_height);
+
+                    // Border (black)
+                    gfx_SetColor(0);
+                    gfx_Rectangle(bar_x, bar_y, bar_width, bar_height);
+                }
+            } else {
+                // Use old sprite system
+                if (current_troop->sprite != NULL) {
+                    gfx_TransparentSprite(current_troop->sprite,
+                                         current_troop->position.x,
+                                         current_troop->position.y);
+
+                    // Draw healthbar if troop is damaged (old sprite system)
+                    if (current_troop->health < (int)current_troop->MAX_HEALTH && current_troop->health > 0) {
+                        int bar_width = 5;
+                        int bar_height = current_troop->sprite->height;
+                        int bar_x = current_troop->position.x + current_troop->sprite->width;
+                        int bar_y = current_troop->position.y;
+
+                        // Background (grey)
+                        gfx_SetColor(136);
+                        gfx_FillRectangle(bar_x, bar_y, bar_width, bar_height);
+
+                        // Health fill (blue for player, red for opponent) - fills from top down
+                        gfx_SetColor(is_opponent[i] ? 150 : 151);
+                        int health_height = (bar_height * current_troop->health) / current_troop->MAX_HEALTH;
+                        gfx_FillRectangle(bar_x, bar_y, bar_width, health_height);
+
+                        // Border (black)
+                        gfx_SetColor(0);
+                        gfx_Rectangle(bar_x, bar_y, bar_width, bar_height);
+                    }
+                }
+            }
+
+            current_troop = current_troop->next;
         }
-
-        // gfx_TransparentSprite(current_troop->sprite, current_troop->position.x, current_troop->position.y);
-        current_troop = current_troop->next;
-    }
-
-    // Draw opponent troops
-    current_troop = game->opponent->troops;
-
-    while (current_troop != NULL) {
-        gfx_TransparentSprite(current_troop->sprite, current_troop->position.x, current_troop->position.y);
-        current_troop = current_troop->next;
     }
 }
 
@@ -1004,10 +1125,19 @@ void* find_nearest_tower(tower_t *towers, position_t position) {
     tower_t *nearest_tower = NULL;
     double min_distance = INFINITY;
 
+    // Tower sizes for center calculation
+    const int PRINCESS_TOWER_SIZE = 50;
+    const int KING_TOWER_SIZE = 60;
+
     for (int i = 0; i < NUM_TOWERS; i++) {
         if (towers[i].active) {
-            double dx = towers[i].position.x - position.x;
-            double dy = towers[i].position.y - position.y;
+            // Use tower CENTER for distance calculation
+            int tower_size = (i == 2) ? KING_TOWER_SIZE : PRINCESS_TOWER_SIZE;
+            double tower_center_x = towers[i].position.x + (tower_size / 2);
+            double tower_center_y = towers[i].position.y + (tower_size / 2);
+
+            double dx = tower_center_x - position.x;
+            double dy = tower_center_y - position.y;
             double distance = sqrt(dx*dx + dy*dy);
 
             if (distance < min_distance) {
@@ -1053,6 +1183,10 @@ void update_troops(game_t *game) {
                     current_troop->prev = prev_troop;
                 }
 
+                // Invalidate any projectiles targeting this troop before freeing
+                invalidate_projectiles_targeting(game->player->projectiles, to_remove);
+                invalidate_projectiles_targeting(game->opponent->projectiles, to_remove);
+
                 // Clean up waypoints before freeing troop
                 clear_waypoints(to_remove);
                 CR_FREE(to_remove);
@@ -1081,11 +1215,27 @@ void update_troops(game_t *game) {
                     current_troop->nearest_tower = find_nearest_tower(opponent->towers, current_troop->position);
                 }
                 tower_t *nearest_tower = (tower_t *)current_troop->nearest_tower;
-                if (nearest_tower != NULL && 
-                    in_range(current_troop->position, current_troop->range, nearest_tower->position)) {
-                    target = nearest_tower;
-                    target_type = TOWER;
-                    in_attack_range = true;
+                if (nearest_tower != NULL) {
+                    // Calculate tower FACING EDGE for range check
+                    // Player troops (is_opponent[i]=false) target LEFT edge of opponent towers
+                    // Opponent troops (is_opponent[i]=true) target RIGHT edge of player towers
+                    int tower_idx = nearest_tower - opponent->towers;
+                    int tower_size = (tower_idx == 2) ? 60 : 50;  // King=60, Princess=50
+                    position_t tower_edge;
+                    if (is_opponent[i]) {
+                        // Opponent troop -> target RIGHT edge of player tower
+                        tower_edge.x = nearest_tower->position.x + tower_size;
+                    } else {
+                        // Player troop -> target LEFT edge of opponent tower
+                        tower_edge.x = nearest_tower->position.x;
+                    }
+                    tower_edge.y = nearest_tower->position.y + (tower_size / 2);
+
+                    if (in_range(current_troop->position, current_troop->range, tower_edge)) {
+                        target = nearest_tower;
+                        target_type = TOWER;
+                        in_attack_range = true;
+                    }
                 }
             }
 
@@ -1109,13 +1259,24 @@ void update_troops(game_t *game) {
                             .next = NULL,
                             .prev = NULL
                         };
-                    
-                        // Calculate angle
-                        position_t target_pos = (target_type == TROOP) ? 
-                            ((troop_t*)target)->position : ((tower_t*)target)->position;
+
+                        // Calculate angle toward target center
+                        position_t target_pos;
+                        if (target_type == TROOP) {
+                            target_pos = ((troop_t*)target)->position;
+                        } else {
+                            // Tower - use center
+                            tower_t *t = (tower_t*)target;
+                            int t_idx = t - opponent->towers;
+                            int t_size = (t_idx == 2) ? 60 : 50;
+                            target_pos.x = t->position.x + (t_size / 2);
+                            target_pos.y = t->position.y + (t_size / 2);
+                        }
                         double dx = target_pos.x - current_troop->position.x;
                         double dy = target_pos.y - current_troop->position.y;
-                        new_projectile->angle = (unsigned int)(atan2(dy, dx) * 180 / M_PI);
+                        double angle_deg = atan2(dy, dx) * 180.0 / M_PI;
+                        if (angle_deg < 0) angle_deg += 360.0;  // Normalize to 0-360
+                        new_projectile->angle = (unsigned int)angle_deg;
 
                         // Add the projectile to the player's projectile list
                         if (players[i]->projectiles == NULL) {
@@ -1129,9 +1290,13 @@ void update_troops(game_t *game) {
                 }
                 // Update attack sprite
                 current_troop->attack_frame = (current_troop->attack_ticks / current_troop->attack_speed) % current_troop->attack_steps;
-                current_troop->sprite = is_opponent[i] ? 
-                    current_troop->attack_cycle_rev[current_troop->attack_frame] : 
-                    current_troop->attack_cycle[current_troop->attack_frame];
+
+                // Only update sprite pointer for old system
+                if (current_troop->sprite_def == NULL) {
+                    current_troop->sprite = is_opponent[i] ?
+                        current_troop->attack_cycle_rev[current_troop->attack_frame] :
+                        current_troop->attack_cycle[current_troop->attack_frame];
+                }
 
                 // Reset movement ticks when switching to attack mode
                 current_troop->movement_ticks = 0;
@@ -1144,10 +1309,19 @@ void update_troops(game_t *game) {
                 current_troop->movement_ticks++;
                 if (current_troop->movement_ticks >= current_troop->movement_update_rate) {
                     current_troop->movement_ticks = 0;
-                    current_troop->movement_frame = (current_troop->movement_frame + 1) % current_troop->movement_steps;
-                    current_troop->sprite = is_opponent[i] ?
-                        current_troop->backward_movement[current_troop->movement_frame] :
-                        current_troop->forward_movement[current_troop->movement_frame];
+
+                    // Update movement frame
+                    if (current_troop->sprite_def != NULL) {
+                        // New system: cycle through movement_sequence_len
+                        current_troop->movement_frame = (current_troop->movement_frame + 1) %
+                            current_troop->sprite_def->movement_sequence_len;
+                    } else {
+                        // Old system
+                        current_troop->movement_frame = (current_troop->movement_frame + 1) % current_troop->movement_steps;
+                        current_troop->sprite = is_opponent[i] ?
+                            current_troop->backward_movement[current_troop->movement_frame] :
+                            current_troop->forward_movement[current_troop->movement_frame];
+                    }
                 }
 
                 // Reset attack ticks when switching to movement mode
@@ -1245,6 +1419,11 @@ void update_spells(game_t *game) {
     }
 }
 
+// DEBUG: Tower targeting counters (visible in debug output)
+int g_tower_target_found = 0;
+int g_tower_in_range = 0;
+int g_tower_attack_ready = 0;
+
 void update_towers(game_t *game) {
     player_t *player = game->player;
     player_t *opponent = game->opponent;
@@ -1254,6 +1433,11 @@ void update_towers(game_t *game) {
     bool is_opponent[] = {false, true};
     static bool bounds_need_update = true;
 
+    // Reset debug counters each frame
+    g_tower_target_found = 0;
+    g_tower_in_range = 0;
+    g_tower_attack_ready = 0;
+
     if (bounds_need_update) {
         update_placement_bounds(game);
         bounds_need_update = false;
@@ -1262,10 +1446,12 @@ void update_towers(game_t *game) {
     for (int i = 0; i < 3; i++) {
         if (player_towers[i].health <= 0 && player_towers[i].active) {
             player_towers[i].active = false;
+            opponent->crowns++;
             bounds_need_update = true;
         }
         if (opponent_towers[i].health <= 0 && opponent_towers[i].active) {
             opponent_towers[i].active = false;
+            player->crowns++;
             bounds_need_update = true;
         }
     }
@@ -1293,21 +1479,28 @@ void update_towers(game_t *game) {
                 
                 current_tower->nearest_troop = target;
 
+                if (target != NULL) {
+                    g_tower_target_found++;
+                }
+
                 if (target != NULL && in_range(current_tower->position, current_tower->range, target->position)) {
+                    g_tower_in_range++;
                     current_tower->attack_ticks++;
 
                     if (current_tower->attack_ticks % current_tower->attack_speed == 0) {
+                        g_tower_attack_ready++;
                         // Create projectile using improved system
                         projectile_t *new_projectile = create_tower_projectile(current_tower, target);
-                        
+
                         if (new_projectile != NULL) {
-                            // Add projectile to player's projectile list
+                            // Add projectile to opponent's projectile list (i=1 for opponent towers)
                             new_projectile->next = players[i]->projectiles;
                             new_projectile->prev = NULL;
                             if (players[i]->projectiles != NULL) {
                                 players[i]->projectiles->prev = new_projectile;
                             }
                             players[i]->projectiles = new_projectile;
+                            g_tower_attack_ready += 10;  // DEBUG: Add 10 to confirm projectile was added
                         }
 
                         // Reset attack ticks
@@ -1516,7 +1709,18 @@ void run_game(game_t *game) {
     while (exit == false) {
         kb_Scan();
 
+        // DEBUG: Destroy towers with number keys 1-6
+        // 1-3: Player towers (top, bottom, king)
+        // 4-6: Opponent towers (top, bottom, king)
+        if (kb_Data[3] & kb_1) { player->towers[0].health = 0; delay(200); }
+        if (kb_Data[4] & kb_2) { player->towers[1].health = 0; delay(200); }
+        if (kb_Data[5] & kb_3) { player->towers[2].health = 0; delay(200); }
+        if (kb_Data[3] & kb_4) { opponent->towers[0].health = 0; delay(200); }
+        if (kb_Data[4] & kb_5) { opponent->towers[1].health = 0; delay(200); }
+        if (kb_Data[5] & kb_6) { opponent->towers[2].health = 0; delay(200); }
+
         handle_keys(player);
+        handle_ai(game);
 
         update_timer(game);
 
@@ -1526,7 +1730,7 @@ void run_game(game_t *game) {
         update_troops(game);
         update_buildings(game);
         update_spells(game);
-        // update_projectiles(game);
+        update_projectiles(game);
 
         // SIMPLIFIED: Just draw background and deck
         gfx_FillScreen(80);
@@ -1536,7 +1740,7 @@ void run_game(game_t *game) {
         draw_troops(game);
         draw_buildings(game);
         draw_spells(game);
-        // draw_projectiles(game);
+        draw_projectiles(game);
 
         // COMMENTED OUT: Debug toggle
         // if (kb_Data[4] & kb_Stat) debug = !debug;
@@ -1548,6 +1752,24 @@ void run_game(game_t *game) {
         if (view_opponent == false) {
             draw_player_modal(player, opponent->towers);
         }
+
+        // DEBUG: Count and show projectiles
+        int p_count = 0, o_count = 0;
+        for (projectile_t *p = player->projectiles; p != NULL; p = p->next) p_count++;
+        for (projectile_t *p = opponent->projectiles; p != NULL; p = p->next) o_count++;
+        gfx_PrintStringXY("PProj:", 10, 30);
+        gfx_PrintInt(p_count, 1);
+        gfx_PrintStringXY("OProj:", 10, 40);
+        gfx_PrintInt(o_count, 1);
+
+        // DEBUG: Tower targeting info
+        extern int g_tower_target_found, g_tower_in_range, g_tower_attack_ready;
+        gfx_PrintStringXY("TgtF:", 10, 50);
+        gfx_PrintInt(g_tower_target_found, 1);
+        gfx_PrintStringXY("InRng:", 10, 60);
+        gfx_PrintInt(g_tower_in_range, 1);
+        gfx_PrintStringXY("Atk:", 10, 70);
+        gfx_PrintInt(g_tower_attack_ready, 1);
         // COMMENTED OUT: Opponent view
         // else {
         //     draw_player_modal(opponent, player->towers);
@@ -1587,18 +1809,30 @@ game_result_t calculate_game_result(game_t *game) {
     result.player_crowns = game->player->crowns;
     result.opponent_crowns = game->opponent->crowns;
 
-    // Determine victory: more crowns or destroyed king tower (3 crowns)
+    // Determine victory/tie/loss based on crowns
+    bool is_tie = false;
     if (result.player_crowns > result.opponent_crowns) {
         result.victory = true;
     } else if (result.player_crowns < result.opponent_crowns) {
         result.victory = false;
     } else {
-        // Tie - check towers destroyed
-        result.victory = (game->player->towers_destroyed > game->opponent->towers_destroyed);
+        // Equal crowns - check towers destroyed for tiebreaker
+        if (game->player->towers_destroyed > game->opponent->towers_destroyed) {
+            result.victory = true;
+        } else if (game->player->towers_destroyed < game->opponent->towers_destroyed) {
+            result.victory = false;
+        } else {
+            // True tie - equal crowns and equal towers destroyed
+            is_tie = true;
+            result.victory = false;
+        }
     }
 
-    // Calculate trophy change based on crowns
-    if (result.victory) {
+    // Calculate trophy change based on result
+    if (is_tie) {
+        // Tie: 0 trophies
+        result.trophy_change = 0;
+    } else if (result.victory) {
         // Win: +20 base, +5 per crown
         result.trophy_change = 20 + (result.player_crowns * 5);
     } else {

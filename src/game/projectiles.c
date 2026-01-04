@@ -20,14 +20,20 @@ position_t get_tower_center(tower_t *tower) {
 
 position_t get_troop_center(troop_t *troop) {
     position_t center;
-    // Get center of troop sprite for accurate targeting
-    if (troop->sprite != NULL) {
+    // troop->position is the anchor point (feet), not top-left
+    // center = top_left + frame_size/2 = (position - anchor) + frame_size/2
+    if (troop->sprite_def != NULL) {
+        // New sprite sheet system
+        center.x = troop->position.x - troop->sprite_def->anchor_x + (troop->sprite_def->frame_width / 2);
+        center.y = troop->position.y - troop->sprite_def->anchor_y + (troop->sprite_def->frame_height / 2);
+    } else if (troop->sprite != NULL) {
+        // Old sprite system - position is top-left for these
         center.x = troop->position.x + (troop->sprite->width / 2);
         center.y = troop->position.y + (troop->sprite->height / 2);
     } else {
-        // Fallback if sprite is null
-        center.x = troop->position.x + 8;
-        center.y = troop->position.y + 8;
+        // Fallback if no sprite
+        center.x = troop->position.x;
+        center.y = troop->position.y;
     }
     return center;
 }
@@ -49,10 +55,10 @@ troop_t* find_closest_target_in_range(tower_t *tower, troop_t *troops, double ma
             double dx = troop_center.x - tower_center.x;
             double dy = troop_center.y - tower_center.y;
             double distance = sqrt(dx * dx + dy * dy);
-            
-            // Use a larger range for initial target finding (towers have range issues)
-            double effective_range = max_range * 10; // Temporarily increase range for testing
-            
+
+            // Use consistent range calculation (range * TILE_SIZE, matching in_range())
+            double effective_range = max_range * 10.0;  // TILE_SIZE = 10
+
             // Check if within range and closer than current closest
             if (distance <= effective_range && distance < closest_distance) {
                 closest_target = current;
@@ -88,15 +94,25 @@ projectile_t* create_tower_projectile(tower_t *tower, troop_t *target) {
     // Calculate initial angle toward target
     double dx = target_center.x - tower_center.x;
     double dy = target_center.y - tower_center.y;
-    projectile->angle = (unsigned int)(atan2(dy, dx) * 180.0 / M_PI);
-    
+    double angle_deg = atan2(dy, dx) * 180.0 / M_PI;
+    if (angle_deg < 0) angle_deg += 360.0;  // Normalize to 0-360
+    projectile->angle = (unsigned int)angle_deg;
+
     return projectile;
 }
 
 void move_projectile_toward_target(projectile_t *projectile) {
-    if (projectile == NULL || projectile->target == NULL) return;
-    
-    // Check if target is still alive
+    if (projectile == NULL) return;
+
+    // Always move projectile in current direction
+    double rad_angle = projectile->angle * M_PI / 180.0;
+    projectile->position.x += cos(rad_angle) * projectile->speed;
+    projectile->position.y += sin(rad_angle) * projectile->speed;
+
+    // If no target, just keep moving in current direction (will be removed when out of bounds)
+    if (projectile->target == NULL) return;
+
+    // Check if target is still alive (only for troops)
     if (projectile->target_type == TROOP) {
         troop_t *troop = (troop_t*)projectile->target;
         if (troop->health <= 0) {
@@ -104,22 +120,27 @@ void move_projectile_toward_target(projectile_t *projectile) {
             return;
         }
     }
-    
-    // Update projectile angle toward moving target (pathfinding)
-    position_t target_center = get_troop_center((troop_t*)projectile->target);
-    
+
+    // Get target center based on target type
+    position_t target_center;
+    if (projectile->target_type == TROOP) {
+        target_center = get_troop_center((troop_t*)projectile->target);
+    } else if (projectile->target_type == TOWER) {
+        target_center = get_tower_center((tower_t*)projectile->target);
+    } else {
+        // Building or unknown - use position directly
+        target_center = ((building_t*)projectile->target)->position;
+    }
+
     double dx = target_center.x - projectile->position.x;
     double dy = target_center.y - projectile->position.y;
-    
-    // Only update angle if target has moved significantly
+
+    // Update angle toward target (homing)
     double distance_to_target = sqrt(dx * dx + dy * dy);
     if (distance_to_target > COLLISION_THRESHOLD) {
-        projectile->angle = (unsigned int)(atan2(dy, dx) * 180.0 / M_PI);
-        
-        // Move projectile toward target
-        double rad_angle = projectile->angle * M_PI / 180.0;
-        projectile->position.x += cos(rad_angle) * projectile->speed;
-        projectile->position.y += sin(rad_angle) * projectile->speed;
+        double angle_deg = atan2(dy, dx) * 180.0 / M_PI;
+        if (angle_deg < 0) angle_deg += 360.0;
+        projectile->angle = (unsigned int)angle_deg;
     }
 }
 
@@ -153,17 +174,16 @@ bool projectile_hit_target(projectile_t *projectile, void *target, card_type_t t
 }
 
 void update_projectile_target(projectile_t *projectile) {
-    if (projectile->target == NULL) return;
-    
-    // Check if target is still alive before updating
-    if (projectile->target_type == TROOP) {
-        troop_t *troop = (troop_t*)projectile->target;
-        if (troop->health <= 0) {
-            projectile->target = NULL;
-            return;
-        }
-    }
-    
-    // Update projectile movement toward target
+    // Always move projectile (handles NULL target internally)
     move_projectile_toward_target(projectile);
+}
+
+void invalidate_projectiles_targeting(projectile_t *projectiles, void *target) {
+    projectile_t *p = projectiles;
+    while (p != NULL) {
+        if (p->target == target) {
+            p->target = NULL;
+        }
+        p = p->next;
+    }
 }
