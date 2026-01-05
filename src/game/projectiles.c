@@ -10,6 +10,45 @@
 #define KING_TOWER_CENTER_OFFSET_X 30
 #define KING_TOWER_CENTER_OFFSET_Y 30
 
+// Get hitbox radius for a troop (with fallback for old sprite system)
+int get_troop_hitbox_radius(troop_t *troop) {
+    if (troop->sprite_def != NULL && troop->sprite_def->hitbox_radius > 0) {
+        return troop->sprite_def->hitbox_radius;
+    }
+    // Fallback: use sprite dimensions / 3
+    if (troop->sprite != NULL) {
+        return (troop->sprite->width + troop->sprite->height) / 6;
+    }
+    return 10;  // Default fallback
+}
+
+// Get hitbox center for a troop (accounts for y_offset and facing direction)
+// For up-facing (player): body is ABOVE feet, offset is negative
+// For down-facing (opponent): body is BELOW feet, offset should be positive (negated)
+position_t get_troop_hitbox_center_facing(troop_t *troop, bool facing_down) {
+    position_t center;
+    center.x = troop->position.x;
+
+    if (troop->sprite_def != NULL) {
+        // For down-facing sprites, negate the y_offset since body extends below feet
+        int offset = troop->sprite_def->hitbox_y_offset;
+        if (facing_down) {
+            offset = -offset;
+        }
+        center.y = troop->position.y + offset;
+    } else {
+        // Fallback: offset by 1/3 of sprite height (direction depends on facing)
+        int offset = troop->sprite ? (troop->sprite->height / 3) : 10;
+        center.y = troop->position.y + (facing_down ? offset : -offset);
+    }
+    return center;
+}
+
+// Legacy version - assumes up-facing (for compatibility)
+position_t get_troop_hitbox_center(troop_t *troop) {
+    return get_troop_hitbox_center_facing(troop, false);
+}
+
 position_t get_tower_center(tower_t *tower) {
     position_t center;
     // Adjust for tower sprite size - towers should fire from center
@@ -19,37 +58,22 @@ position_t get_tower_center(tower_t *tower) {
 }
 
 position_t get_troop_center(troop_t *troop) {
-    position_t center;
-    // troop->position is the anchor point (feet), not top-left
-    // center = top_left + frame_size/2 = (position - anchor) + frame_size/2
-    if (troop->sprite_def != NULL) {
-        // New sprite sheet system
-        center.x = troop->position.x - troop->sprite_def->anchor_x + (troop->sprite_def->frame_width / 2);
-        center.y = troop->position.y - troop->sprite_def->anchor_y + (troop->sprite_def->frame_height / 2);
-    } else if (troop->sprite != NULL) {
-        // Old sprite system - position is top-left for these
-        center.x = troop->position.x + (troop->sprite->width / 2);
-        center.y = troop->position.y + (troop->sprite->height / 2);
-    } else {
-        // Fallback if no sprite
-        center.x = troop->position.x;
-        center.y = troop->position.y;
-    }
-    return center;
+    // Use hitbox center with facing direction for consistency
+    return get_troop_hitbox_center_facing(troop, troop->facing_down);
 }
 
 troop_t* find_closest_target_in_range(tower_t *tower, troop_t *troops, double max_range) {
     if (troops == NULL || tower == NULL) return NULL;
-    
+
     position_t tower_center = get_tower_center(tower);
     troop_t *closest_target = NULL;
     double closest_distance = max_range + 1;
-    
+
     troop_t *current = troops;
     while (current != NULL) {
         // Only target living troops
         if (current->health > 0) {
-            position_t troop_center = get_troop_center(current);
+            position_t troop_center = get_troop_hitbox_center_facing(current, current->facing_down);
             
             // Calculate distance from tower center to troop center
             double dx = troop_center.x - tower_center.x;
@@ -146,31 +170,39 @@ void move_projectile_toward_target(projectile_t *projectile) {
 
 bool projectile_hit_target(projectile_t *projectile, void *target, card_type_t target_type) {
     if (projectile == NULL || target == NULL) return false;
-    
+
     position_t target_center;
-    
+    int target_radius;
+
     switch (target_type) {
-        case TROOP:
-            target_center = get_troop_center((troop_t*)target);
+        case TROOP: {
+            troop_t *troop = (troop_t*)target;
+            target_center = get_troop_hitbox_center_facing(troop, troop->facing_down);
+            target_radius = get_troop_hitbox_radius(troop);
             break;
+        }
         case TOWER:
             target_center = get_tower_center((tower_t*)target);
+            target_radius = 25;  // Fixed tower hitbox radius
             break;
         case BUILDING:
             // Buildings use position directly for now
             target_center = ((building_t*)target)->position;
+            target_center.x += 15;  // Approximate center
+            target_center.y += 15;
+            target_radius = 15;
             break;
         default:
             return false;
     }
-    
-    // Calculate distance between projectile and target center
-    double dx = projectile->position.x - target_center.x;
-    double dy = projectile->position.y - target_center.y;
-    double distance = sqrt(dx * dx + dy * dy);
-    
-    // Use a larger collision threshold to make hits more reliable
-    return distance <= (COLLISION_THRESHOLD * 2);
+
+    // Calculate distance squared (avoid sqrt for performance)
+    int dx = projectile->position.x - target_center.x;
+    int dy = projectile->position.y - target_center.y;
+    int dist_sq = dx * dx + dy * dy;
+
+    // Hit if projectile is within target's hitbox radius
+    return dist_sq <= (target_radius * target_radius);
 }
 
 void update_projectile_target(projectile_t *projectile) {

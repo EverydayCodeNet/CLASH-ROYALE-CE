@@ -284,34 +284,36 @@ void display_stats(void) {
 }
 
 bool check_collision(projectile_t *projectile, void *target, card_type_t target_type) {
-    position_t target_pos;
-    int target_width, target_height;
+    position_t target_center;
+    int target_radius;
 
     switch (target_type) {
-        case TROOP:
-            target_pos = ((troop_t*)target)->position;
-            target_width = ((troop_t*)target)->sprite->width;
-            target_height = ((troop_t*)target)->sprite->height;
+        case TROOP: {
+            troop_t *troop = (troop_t*)target;
+            target_center = get_troop_hitbox_center_facing(troop, troop->facing_down);
+            target_radius = get_troop_hitbox_radius(troop);
             break;
+        }
         case TOWER:
-            target_pos = ((tower_t*)target)->position;
-            target_width = ((tower_t*)target)->sprite->width;
-            target_height = ((tower_t*)target)->sprite->height;
+            target_center = get_tower_center((tower_t*)target);
+            target_radius = 25;  // Fixed tower hitbox radius
             break;
         case BUILDING:
-            target_pos = ((building_t*)target)->position;
-            target_width = ((building_t*)target)->sprite->width;
-            target_height = ((building_t*)target)->sprite->height;
+            target_center = ((building_t*)target)->position;
+            target_center.x += 15;  // Approximate center
+            target_center.y += 15;
+            target_radius = 15;
             break;
         default:
             return false;
     }
 
-    // Check if the projectile's position is within the target's bounding box
-    return (projectile->position.x >= target_pos.x &&
-            projectile->position.x < target_pos.x + target_width &&
-            projectile->position.y >= target_pos.y &&
-            projectile->position.y < target_pos.y + target_height);
+    // Check if projectile is within target's circular hitbox (distance squared)
+    int dx = projectile->position.x - target_center.x;
+    int dy = projectile->position.y - target_center.y;
+    int dist_sq = dx * dx + dy * dy;
+
+    return dist_sq <= (target_radius * target_radius);
 }
 
 void apply_damage(void *target, card_type_t target_type, int damage) {
@@ -617,6 +619,7 @@ void place_card(player_t *player, card_t *card, cursor_t cursor, void **list) {
         troop->target = card->target;
         troop->movement = card->movement;
         troop->TARGET_TROOPS = card->TARGET_TROOPS;
+        troop->facing_down = player->opponent;  // Opponent troops face down toward player
 
         // Initialize target tracking
         troop->nearest_tower = NULL;
@@ -950,6 +953,9 @@ void create_projectile(player_t *player, projectile_t *template) {
     player->projectiles = new_projectile;
 }
 
+// Debug flag for hitbox visualization (toggle with Stat key in run_game)
+static bool g_debug_hitboxes = false;
+
 void draw_troops(game_t *game) {
     player_t *players[] = {game->player, game->opponent};
     bool is_opponent[] = {false, true};
@@ -1033,6 +1039,33 @@ void draw_troops(game_t *game) {
                         gfx_Rectangle(bar_x, bar_y, bar_width, bar_height);
                     }
                 }
+            }
+
+            // Debug: Draw hitbox circles
+            if (g_debug_hitboxes) {
+                // Use facing-aware hitbox center (opponent = facing_down)
+                bool facing_down = is_opponent[i];
+                position_t hitbox_center = get_troop_hitbox_center_facing(current_troop, facing_down);
+                int body_radius = get_troop_hitbox_radius(current_troop);
+                int attack_reach = 0;
+
+                if (current_troop->sprite_def != NULL) {
+                    attack_reach = current_troop->sprite_def->attack_reach;
+                }
+
+                // Draw body hitbox (green for player, red for opponent)
+                gfx_SetColor(is_opponent[i] ? 224 : 4);  // Red / Green
+                gfx_Circle(hitbox_center.x, hitbox_center.y, body_radius);
+
+                // Draw attack reach (yellow) - only for melee
+                if (attack_reach > 0) {
+                    gfx_SetColor(231);  // Yellow
+                    gfx_Circle(hitbox_center.x, hitbox_center.y, body_radius + attack_reach);
+                }
+
+                // Draw anchor point (white dot)
+                gfx_SetColor(255);
+                gfx_SetPixel(current_troop->position.x, current_troop->position.y);
             }
 
             current_troop = current_troop->next;
@@ -1165,6 +1198,73 @@ bool in_range(position_t position, double range, position_t target_position) {
     return distance <= range * TILE_SIZE;
 }
 
+// Check if attacker troop can hit target troop (accounts for both hitboxes)
+// Returns true if hitbox edges are within attack range
+bool troop_in_troop_range(troop_t *attacker, troop_t *target) {
+    // Get attacker hitbox info (using facing_down for correct Y offset)
+    int attacker_radius = get_troop_hitbox_radius(attacker);
+    position_t attacker_center = get_troop_hitbox_center_facing(attacker, attacker->facing_down);
+    int attack_reach = 0;
+
+    if (attacker->sprite_def != NULL) {
+        attack_reach = attacker->sprite_def->attack_reach;
+    } else {
+        attack_reach = 5;  // Default melee reach
+    }
+
+    // Get target hitbox info (using facing_down for correct Y offset)
+    int target_radius = get_troop_hitbox_radius(target);
+    position_t target_center = get_troop_hitbox_center_facing(target, target->facing_down);
+
+    // Calculate distance between hitbox centers
+    int dx = target_center.x - attacker_center.x;
+    int dy = target_center.y - attacker_center.y;
+    int dist_sq = dx * dx + dy * dy;
+
+    // Attacker can hit if distance between centers <= sum of radii + attack reach
+    // Also respect the troop's range stat for ranged units
+    int range_pixels = (int)(attacker->range * TILE_SIZE);
+    int melee_reach = attacker_radius + attack_reach + target_radius;
+
+    // Use the larger of melee reach or range stat
+    int effective_reach = (range_pixels > melee_reach) ? range_pixels : melee_reach;
+
+    return dist_sq <= (effective_reach * effective_reach);
+}
+
+// Check if troop hitbox + attack reach can hit tower
+// Uses circular hitbox centered on troop position with attack_reach extension
+bool troop_in_tower_range(troop_t *troop, tower_t *tower, int tower_size, bool is_opponent_troop) {
+    int hitbox_radius, attack_reach;
+
+    if (troop->sprite_def != NULL) {
+        hitbox_radius = troop->sprite_def->hitbox_radius;
+        attack_reach = troop->sprite_def->attack_reach;
+    } else {
+        // Fallback for old sprite system
+        hitbox_radius = (troop->sprite ? (troop->sprite->width + troop->sprite->height) / 6 : 10);
+        attack_reach = 5;  // Default melee reach
+    }
+
+    // Total reach = body radius + attack extension
+    int total_reach = hitbox_radius + attack_reach;
+
+    // Hitbox edge positions
+    int hitbox_left = troop->position.x - total_reach;
+    int hitbox_right = troop->position.x + total_reach;
+
+    int tower_left = tower->position.x;
+    int tower_right = tower->position.x + tower_size;
+
+    if (is_opponent_troop) {
+        // Opponent troop walking LEFT -> check if hitbox left edge <= tower right edge
+        return hitbox_left <= tower_right;
+    } else {
+        // Player troop walking RIGHT -> check if hitbox right edge >= tower left edge
+        return hitbox_right >= tower_left;
+    }
+}
+
 void update_troops(game_t *game) {
     player_t *players[] = {game->player, game->opponent};
     bool is_opponent[] = {false, true};
@@ -1208,8 +1308,8 @@ void update_troops(game_t *game) {
             // Check for nearby opponent troop only if the current troop targets troops
             if (current_troop->TARGET_TROOPS) {
                 troop_t *nearest_opponent_troop = find_nearest_troop(opponent->troops, current_troop->position, current_troop->target);
-                if (nearest_opponent_troop != NULL && 
-                    in_range(current_troop->position, current_troop->range, nearest_opponent_troop->position)) {
+                if (nearest_opponent_troop != NULL &&
+                    troop_in_troop_range(current_troop, nearest_opponent_troop)) {
                     target = nearest_opponent_troop;
                     target_type = TROOP;
                     in_attack_range = true;
@@ -1225,22 +1325,13 @@ void update_troops(game_t *game) {
                 }
                 tower_t *nearest_tower = (tower_t *)current_troop->nearest_tower;
                 if (nearest_tower != NULL && nearest_tower->active) {
-                    // Calculate tower FACING EDGE for range check
-                    // Player troops (is_opponent[i]=false) target LEFT edge of opponent towers
-                    // Opponent troops (is_opponent[i]=true) target RIGHT edge of player towers
                     int tower_idx = nearest_tower - opponent->towers;
                     int tower_size = (tower_idx == 2) ? 60 : 50;  // King=60, Princess=50
-                    position_t tower_edge;
-                    if (is_opponent[i]) {
-                        // Opponent troop -> target RIGHT edge of player tower
-                        tower_edge.x = nearest_tower->position.x + tower_size;
-                    } else {
-                        // Player troop -> target LEFT edge of opponent tower
-                        tower_edge.x = nearest_tower->position.x;
-                    }
-                    tower_edge.y = nearest_tower->position.y + (tower_size / 2);
 
-                    if (in_range(current_troop->position, current_troop->range, tower_edge)) {
+                    // Use sprite edge collision for tower range check
+                    // Player troops: sprite right edge >= tower left edge
+                    // Opponent troops: sprite left edge <= tower right edge
+                    if (troop_in_tower_range(current_troop, nearest_tower, tower_size, is_opponent[i])) {
                         target = nearest_tower;
                         target_type = TOWER;
                         in_attack_range = true;
@@ -1492,13 +1583,23 @@ void update_towers(game_t *game) {
     for (int i = 0; i < 3; i++) {
         if (player_towers[i].health <= 0 && player_towers[i].active) {
             player_towers[i].active = false;
-            opponent->crowns++;
             bounds_need_update = true;
+            // King tower (index 2) awards 3 crowns, princess towers award 1
+            if (i == 2) {
+                opponent->crowns = 3;
+            } else {
+                opponent->crowns++;
+            }
         }
         if (opponent_towers[i].health <= 0 && opponent_towers[i].active) {
             opponent_towers[i].active = false;
-            player->crowns++;
             bounds_need_update = true;
+            // King tower (index 2) awards 3 crowns, princess towers award 1
+            if (i == 2) {
+                player->crowns = 3;
+            } else {
+                player->crowns++;
+            }
         }
     }
 
@@ -1564,17 +1665,31 @@ void update_towers(game_t *game) {
 bool check_win(game_t *game) {
     player_t *player = game->player;
     player_t *opponent = game->opponent;
+    tower_t *player_towers = player->towers;
+    tower_t *opponent_towers = opponent->towers;
 
-    // Flatten this conditional
-    if (get_remaining_time(game) > 0) {
-        if (player->towers_destroyed == NUM_TOWERS || opponent->towers_destroyed == NUM_TOWERS) {
-            return true;
-        }
-    } else {
+    // Check if king tower (index 2) is destroyed for either player
+    if (player_towers[2].health <= 0 || opponent_towers[2].health <= 0) {
         return true;
     }
 
-    // return true if 3 towers are destroyed
+    // Check here if all 3 towers are destroyed for either player to end
+
+    // Re-add timer check here as well
+
+    // Check if all 3 towers are destroyed for either player
+    // bool all_player_towers_destroyed = !player_towers[0].active &&
+    //                                     !player_towers[1].active &&
+    //                                     !player_towers[2].active;
+    // bool all_opponent_towers_destroyed = !opponent_towers[0].active &&
+    //                                       !opponent_towers[1].active &&
+    //                                       !opponent_towers[2].active;
+
+    // if (all_player_towers_destroyed || all_opponent_towers_destroyed) {
+    //     return true;
+    // }
+
+
     return false;
 }
 
@@ -1765,6 +1880,12 @@ void run_game(game_t *game) {
         if (kb_Data[4] & kb_5) { opponent->towers[1].health = 0; delay(200); }
         if (kb_Data[5] & kb_6) { opponent->towers[2].health = 0; delay(200); }
 
+        // DEBUG: Toggle hitbox visualization with Stat key
+        if (kb_Data[4] & kb_Stat) {
+            g_debug_hitboxes = !g_debug_hitboxes;
+            delay(200);
+        }
+
         handle_keys(player);
         handle_ai(game);
 
@@ -1836,6 +1957,8 @@ void run_game(game_t *game) {
             exit = true;
         }
 
+        if (check_win(game)) exit = true;
+
         // COMMENTED OUT: Win condition check
         // if (kb_Data[6] & kb_Clear || check_win(game) == true) exit = true;
     } while (!(exit));
@@ -1852,8 +1975,18 @@ void run_game(game_t *game) {
 game_result_t calculate_game_result(game_t *game) {
     game_result_t result = {0};
 
-    result.player_crowns = game->player->crowns;
-    result.opponent_crowns = game->opponent->crowns;
+    // If king tower is destroyed, award 3 crowns
+    if (game->opponent->towers[2].health <= 0) {
+        result.player_crowns = 3;
+    } else {
+        result.player_crowns = game->player->crowns;
+    }
+
+    if (game->player->towers[2].health <= 0) {
+        result.opponent_crowns = 3;
+    } else {
+        result.opponent_crowns = game->opponent->crowns;
+    }
 
     // Determine victory/tie/loss based on crowns
     bool is_tie = false;

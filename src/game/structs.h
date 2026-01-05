@@ -41,6 +41,11 @@ typedef struct {
     int8_t anchor_x;
     int8_t anchor_y;
 
+    // Hitbox (circular, centered on anchor point offset upward by hitbox_y_offset)
+    uint8_t hitbox_radius;      // Body radius for taking damage
+    uint8_t attack_reach;       // Additional reach when attacking (melee)
+    int8_t hitbox_y_offset;     // Offset from anchor to hitbox center (negative = up)
+
 } troop_sprite_def_t;
 // Change to attack_target_type
 // typedef enum {TOWER, TROOP, BUILDING} projectile_target_type_t;
@@ -283,6 +288,7 @@ typedef struct{
     // Head of the linked list
     bool head;
     bool opponent_sprite_variant;
+    bool facing_down;  // true for opponent troops (face toward player)
     void *next;
     void *prev;
 } troop_t;

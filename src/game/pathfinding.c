@@ -252,12 +252,30 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
             if (troop_is_on_left) {
                 // Player troop walking right -> target LEFT edge of opponent tower
                 target_pos.x = tower->position.x;
+                // Y: offset so sprite CENTER aligns with tower center, not feet
+                // For up-facing sprites, body extends above feet position
+                // offset = anchor_y - frame_height/2 (opposite of down-facing)
+                int tower_center_y = tower->position.y + (tower_size / 2);
+                if (troop->sprite_def != NULL) {
+                    int offset = troop->sprite_def->anchor_y - (troop->sprite_def->frame_height / 2);
+                    target_pos.y = tower_center_y + offset;
+                } else {
+                    target_pos.y = tower_center_y;
+                }
             } else {
                 // Opponent troop walking left -> target RIGHT edge of player tower
                 target_pos.x = tower->position.x + tower_size;
+                // Y: offset so sprite CENTER aligns with tower center, not feet
+                // For down-facing sprites, body extends below feet position
+                // offset = frame_height/2 - anchor_y (negative = target higher Y)
+                int tower_center_y = tower->position.y + (tower_size / 2);
+                if (troop->sprite_def != NULL) {
+                    int offset = (troop->sprite_def->frame_height / 2) - troop->sprite_def->anchor_y;
+                    target_pos.y = tower_center_y + offset;
+                } else {
+                    target_pos.y = tower_center_y;
+                }
             }
-            // Y is always the midpoint
-            target_pos.y = tower->position.y + (tower_size / 2);
             break;
         }
     }
@@ -270,12 +288,26 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
             if (target == check_building) {
                 is_building = true;
                 // Target building facing edge (approximate 30px width)
+                int building_center_y = check_building->position.y + 15;
                 if (troop_is_on_left) {
                     target_pos.x = check_building->position.x;
+                    // Up-facing sprite: body extends above feet
+                    if (troop->sprite_def != NULL) {
+                        int offset = troop->sprite_def->anchor_y - (troop->sprite_def->frame_height / 2);
+                        target_pos.y = building_center_y + offset;
+                    } else {
+                        target_pos.y = building_center_y;
+                    }
                 } else {
                     target_pos.x = check_building->position.x + 30;
+                    // Down-facing sprite: body extends below feet
+                    if (troop->sprite_def != NULL) {
+                        int offset = (troop->sprite_def->frame_height / 2) - troop->sprite_def->anchor_y;
+                        target_pos.y = building_center_y + offset;
+                    } else {
+                        target_pos.y = building_center_y;
+                    }
                 }
-                target_pos.y = check_building->position.y + 15;
                 break;
             }
             check_building = check_building->next;
@@ -310,11 +342,9 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
                 // Not on bridge, need to navigate to one
                 bridge_t *bridge = select_nearest_bridge(anchor_pos, target_pos);
 
-                // Move toward the bridge top-left (same logic as towers)
-                double bridge_target_x = bridge->center.x;
-                double bridge_target_y = bridge->center.y;
-                double dx = bridge_target_x - troop->position.x;
-                double dy = bridge_target_y - troop->position.y;
+                // Move toward the bridge center (no Y offset - is_on_bridge checks feet position)
+                double dx = bridge->center.x - troop->position.x;
+                double dy = bridge->center.y - troop->position.y;
                 troop->angle = atan2(dy, dx);
 
                 troop->position.x += troop->step_size * cos(troop->angle);

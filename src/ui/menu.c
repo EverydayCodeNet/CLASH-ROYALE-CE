@@ -45,6 +45,9 @@ static troop_sprite_def_t MINER_SPRITE_DEF = {
     .projectile_height = 0,
     .anchor_x = 22,
     .anchor_y = 40,
+    .hitbox_radius = 12,
+    .attack_reach = 8,
+    .hitbox_y_offset = -15,
 };
 
 static troop_sprite_def_t MUSKETEER_SPRITE_DEF = {
@@ -65,6 +68,9 @@ static troop_sprite_def_t MUSKETEER_SPRITE_DEF = {
     .projectile_height = 0,
     .anchor_x = 20,
     .anchor_y = 35,
+    .hitbox_radius = 10,
+    .attack_reach = 0,      // Ranged unit - uses projectiles
+    .hitbox_y_offset = -14,
 };
 
 static troop_sprite_def_t GIANT_SPRITE_DEF = {
@@ -85,6 +91,9 @@ static troop_sprite_def_t GIANT_SPRITE_DEF = {
     .projectile_height = 0,
     .anchor_x = 25,
     .anchor_y = 45,
+    .hitbox_radius = 18,
+    .attack_reach = 8,
+    .hitbox_y_offset = -20,
 };
 
 static troop_sprite_def_t KNIGHT_SPRITE_DEF = {
@@ -105,6 +114,9 @@ static troop_sprite_def_t KNIGHT_SPRITE_DEF = {
     .projectile_height = 0,
     .anchor_x = 22,
     .anchor_y = 40,
+    .hitbox_radius = 12,
+    .attack_reach = 10,
+    .hitbox_y_offset = -15,
 };
 
 // create_save() function is now defined in data.c
