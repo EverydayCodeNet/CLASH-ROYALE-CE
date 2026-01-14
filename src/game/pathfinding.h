@@ -49,6 +49,9 @@ bool is_blocked_by_tower(position_t pos, player_t *player, player_t *opponent);
 bool is_blocked_by_building(position_t pos, player_t *player, player_t *opponent);
 bool is_position_blocked(position_t pos, player_t *player, player_t *opponent);
 
+// Push-out when stuck inside tower collision zone
+position_t get_tower_pushout(position_t pos, player_t *player, player_t *opponent);
+
 // Steering around obstacles
 position_t steer_around_obstacle(position_t current, position_t desired, player_t *player, player_t *opponent);
 position_t steer_around_structures(position_t current, position_t desired, player_t *player, player_t *opponent);

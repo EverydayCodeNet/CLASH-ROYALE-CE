@@ -80,8 +80,10 @@ typedef struct {
 typedef struct {
     gfx_sprite_t *sprite;
     position_t position;
+    position_t origin;           // Where projectile was spawned (for range check)
+    double max_range;            // Maximum distance projectile can travel
 
-    // Maybe 
+    // Maybe
     card_type_t target_type;
     unsigned int angle;
     unsigned int damage;
@@ -304,6 +306,7 @@ typedef struct {
     unsigned int duration;
     unsigned int time_elapsed;
     timer_t time_placed;
+    bool cast_by_opponent;       // Track who cast the spell for damage targeting
     void *next;
     void *prev;
 } spell_t;
@@ -343,8 +346,9 @@ typedef struct {
     unsigned int attack_ticks;
     unsigned int attack_speed;
     unsigned int duration;
-    // timer_t time_placed;
+    timer_t time_placed;
     unsigned int time_elapsed;
+    unsigned int last_elixir_second;  // Track last second we generated elixir
 
     target_type_t target;
     void *next;

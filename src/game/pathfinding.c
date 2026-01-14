@@ -73,6 +73,53 @@ bool is_blocked_by_tower(position_t pos, player_t *player, player_t *opponent) {
     return false;
 }
 
+// Check if position is inside any tower and return push-out position
+// Returns the same position if not inside a tower, or a position pushed outside
+position_t get_tower_pushout(position_t pos, player_t *player, player_t *opponent) {
+    const int PRINCESS_TOWER_SIZE = 50;
+    const int KING_TOWER_SIZE = 60;
+
+    player_t *players[2] = {player, opponent};
+
+    for (int p = 0; p < 2; p++) {
+        if (players[p] == NULL || players[p]->towers == NULL) continue;
+
+        for (int i = 0; i < 3; i++) {
+            tower_t *tower = &players[p]->towers[i];
+            if (!tower->active) continue;
+
+            int tower_size = (i == 2) ? KING_TOWER_SIZE : PRINCESS_TOWER_SIZE;
+            int tower_radius = (i == 2) ? KING_TOWER_RADIUS : PRINCESS_TOWER_RADIUS;
+
+            double center_x = tower->position.x + (tower_size / 2);
+            double center_y = tower->position.y + (tower_size / 2);
+
+            double dx = pos.x - center_x;
+            double dy = pos.y - center_y;
+            double dist = sqrt(dx * dx + dy * dy);
+
+            // If inside tower, calculate push direction
+            if (dist < tower_radius) {
+                position_t push;
+                if (dist < 0.1) {
+                    // Exactly at center - push in arbitrary direction (toward closest edge)
+                    push.x = pos.x + tower_radius + 5;
+                    push.y = pos.y;
+                } else {
+                    // Push radially outward past the tower edge
+                    double push_dist = tower_radius + 5 - dist;
+                    push.x = pos.x + (dx / dist) * push_dist;
+                    push.y = pos.y + (dy / dist) * push_dist;
+                }
+                return push;
+            }
+        }
+    }
+
+    // Not inside any tower
+    return pos;
+}
+
 bool is_blocked_by_building(position_t pos, player_t *player, player_t *opponent) {
     // Check both player's and opponent's buildings
     player_t *players[2] = {player, opponent};
@@ -400,6 +447,62 @@ void advance_waypoint(troop_t *troop) {
 // ============================================================================
 
 void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *opponent) {
+    // AIR TROOPS: Simple direct flight to nearest tower - no obstacle avoidance needed
+    if (troop->movement == AIR_MOVEMENT) {
+        // Find nearest enemy tower directly
+        tower_t *nearest_tower = NULL;
+        double min_dist_sq = 999999.0;
+
+        const int PRINCESS_TOWER_SIZE = 50;
+        const int KING_TOWER_SIZE = 60;
+
+        for (int i = 0; i < 3; i++) {
+            tower_t *t = &opponent->towers[i];
+            if (t->active && t->health > 0) {
+                int tower_size = (i == 2) ? KING_TOWER_SIZE : PRINCESS_TOWER_SIZE;
+                double tower_center_x = t->position.x + (tower_size / 2);
+                double tower_center_y = t->position.y + (tower_size / 2);
+
+                double dx = tower_center_x - troop->position.x;
+                double dy = tower_center_y - troop->position.y;
+                double dist_sq = dx * dx + dy * dy;
+
+                if (dist_sq < min_dist_sq) {
+                    min_dist_sq = dist_sq;
+                    nearest_tower = t;
+                }
+            }
+        }
+
+        if (nearest_tower != NULL) {
+            // Calculate tower center
+            int tower_idx = nearest_tower - opponent->towers;
+            int tower_size = (tower_idx == 2) ? KING_TOWER_SIZE : PRINCESS_TOWER_SIZE;
+            double target_x = nearest_tower->position.x + (tower_size / 2);
+            double target_y = nearest_tower->position.y + (tower_size / 2);
+
+            // Fly directly toward tower center
+            double dx = target_x - troop->position.x;
+            double dy = target_y - troop->position.y;
+            double dist = sqrt(dx * dx + dy * dy);
+
+            if (dist > 0.1) {
+                troop->angle = atan2(dy, dx);
+                troop->position.x += troop->step_size * cos(troop->angle);
+                troop->position.y += troop->step_size * sin(troop->angle);
+            }
+        }
+        return;  // AIR troops done, skip ground pathfinding
+    }
+
+    // GROUND TROOPS: Need obstacle avoidance
+    // First, check if troop is stuck inside a tower and push them out
+    position_t pushed = get_tower_pushout(troop->position, my_player, opponent);
+    if (pushed.x != troop->position.x || pushed.y != troop->position.y) {
+        troop->position = pushed;
+        return;  // Don't do normal movement this tick - just escape the tower
+    }
+
     // Find target (troop or building/tower depending on TARGET_TROOPS flag)
     void *target = find_target(troop, my_player, opponent);
 
@@ -409,6 +512,8 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
     // Player troops (on left) walk right -> target LEFT edge of opponent towers
     // Opponent troops (on right) walk left -> target RIGHT edge of player towers
     position_t target_pos;
+    target_pos.x = troop->position.x;  // Initialize to current position as fallback
+    target_pos.y = troop->position.y;
 
     // Tower dimensions
     const int PRINCESS_TOWER_SIZE = 50;
@@ -426,15 +531,19 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
             is_tower = true;
             tower_t *tower = (tower_t*)target;
             int tower_size = (i == 2) ? KING_TOWER_SIZE : PRINCESS_TOWER_SIZE;
+            int tower_center_x = tower->position.x + (tower_size / 2);
+            int tower_center_y = tower->position.y + (tower_size / 2);
 
-            // Target the FACING edge of the tower
-            if (troop_is_on_left) {
+            // AIR troops (balloon) fly to tower CENTER to drop bombs
+            if (troop->movement == AIR_MOVEMENT) {
+                target_pos.x = tower_center_x;
+                target_pos.y = tower_center_y;
+            }
+            // GROUND troops target the FACING edge of the tower
+            else if (troop_is_on_left) {
                 // Player troop walking right -> target LEFT edge of opponent tower
                 target_pos.x = tower->position.x;
                 // Y: offset so sprite CENTER aligns with tower center, not feet
-                // For up-facing sprites, body extends above feet position
-                // offset = anchor_y - frame_height/2 (opposite of down-facing)
-                int tower_center_y = tower->position.y + (tower_size / 2);
                 if (troop->sprite_def != NULL) {
                     int offset = troop->sprite_def->anchor_y - (troop->sprite_def->frame_height / 2);
                     target_pos.y = tower_center_y + offset;
@@ -445,9 +554,6 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
                 // Opponent troop walking left -> target RIGHT edge of player tower
                 target_pos.x = tower->position.x + tower_size;
                 // Y: offset so sprite CENTER aligns with tower center, not feet
-                // For down-facing sprites, body extends below feet position
-                // offset = frame_height/2 - anchor_y (negative = target higher Y)
-                int tower_center_y = tower->position.y + (tower_size / 2);
                 if (troop->sprite_def != NULL) {
                     int offset = (troop->sprite_def->frame_height / 2) - troop->sprite_def->anchor_y;
                     target_pos.y = tower_center_y + offset;
@@ -456,6 +562,36 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
                 }
             }
             break;
+        }
+    }
+
+    // Fallback: If target is a tower but wasn't found via pointer comparison,
+    // try to identify it by checking if it looks like a tower (has position field at tower offset)
+    if (!is_tower) {
+        // Check if target might be a tower by trying to match position
+        tower_t *potential_tower = (tower_t*)target;
+        for (int i = 0; i < 3; i++) {
+            tower_t *t = &opponent->towers[i];
+            if (t->active &&
+                potential_tower->position.x == t->position.x &&
+                potential_tower->position.y == t->position.y) {
+                is_tower = true;
+                int tower_size = (i == 2) ? KING_TOWER_SIZE : PRINCESS_TOWER_SIZE;
+                int tower_center_x = t->position.x + (tower_size / 2);
+                int tower_center_y = t->position.y + (tower_size / 2);
+
+                if (troop->movement == AIR_MOVEMENT) {
+                    target_pos.x = tower_center_x;
+                    target_pos.y = tower_center_y;
+                } else if (troop_is_on_left) {
+                    target_pos.x = t->position.x;
+                    target_pos.y = tower_center_y;
+                } else {
+                    target_pos.x = t->position.x + tower_size;
+                    target_pos.y = tower_center_y;
+                }
+                break;
+            }
         }
     }
 

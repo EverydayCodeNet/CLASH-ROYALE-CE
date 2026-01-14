@@ -57,6 +57,37 @@ position_t get_tower_center(tower_t *tower) {
     return center;
 }
 
+// Get the projectile spawn position for a tower based on ownership
+// Player towers (left side) fire from right edge, opponent towers fire from left edge
+position_t get_tower_projectile_spawn(tower_t *tower) {
+    position_t spawn;
+
+    // Determine tower size (King tower at x=50 or x=260 is 60px, Princess is 50px)
+    int tower_width = 50;
+    int tower_height = 50;
+
+    // Check if this is a king tower by position
+    if (tower->position.x == 50 || tower->position.x == 260) {
+        tower_width = 60;
+        tower_height = 60;
+    }
+
+    // Y is always centered
+    spawn.y = tower->position.y + (tower_height / 2);
+
+    // Determine if this is a player tower (left side) or opponent tower (right side)
+    // Player towers are at x < 180, opponent towers at x >= 180
+    if (tower->position.x < 180) {
+        // Player tower: fire from right edge toward opponent
+        spawn.x = tower->position.x + tower_width;
+    } else {
+        // Opponent tower: fire from left edge toward player
+        spawn.x = tower->position.x;
+    }
+
+    return spawn;
+}
+
 position_t get_troop_center(troop_t *troop) {
     // Use hitbox center with facing direction for consistency
     return get_troop_hitbox_center_facing(troop, troop->facing_down);
@@ -97,27 +128,29 @@ troop_t* find_closest_target_in_range(tower_t *tower, troop_t *troops, double ma
 
 projectile_t* create_tower_projectile(tower_t *tower, troop_t *target) {
     if (tower == NULL || target == NULL) return NULL;
-    
+
     // Use the memory system from the game
     projectile_t *projectile = CR_MALLOC(sizeof(projectile_t));
     if (projectile == NULL) return NULL;
-    
-    // Start projectile from tower center
-    position_t tower_center = get_tower_center(tower);
+
+    // Start projectile from tower's firing edge (not center)
+    position_t spawn_pos = get_tower_projectile_spawn(tower);
     position_t target_center = get_troop_center(target);
-    
+
     projectile->sprite = tower->projectile_sprite;
-    projectile->position = tower_center;
+    projectile->position = spawn_pos;
+    projectile->origin = spawn_pos;                              // Track origin for range check
+    projectile->max_range = tower->range * 10.0 + 50.0;         // Range in pixels + buffer
     projectile->target_type = TROOP;
     projectile->damage = tower->damage;
     projectile->speed = tower->projectile_speed;
     projectile->target = target;
     projectile->next = NULL;
     projectile->prev = NULL;
-    
+
     // Calculate initial angle toward target
-    double dx = target_center.x - tower_center.x;
-    double dy = target_center.y - tower_center.y;
+    double dx = target_center.x - spawn_pos.x;
+    double dy = target_center.y - spawn_pos.y;
     double angle_deg = atan2(dy, dx) * 180.0 / M_PI;
     if (angle_deg < 0) angle_deg += 360.0;  // Normalize to 0-360
     projectile->angle = (unsigned int)angle_deg;

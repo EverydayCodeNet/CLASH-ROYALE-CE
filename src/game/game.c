@@ -57,38 +57,52 @@ void draw_placement_bounds(player_t *player, card_t *selected_card, tower_t *ene
     // For player: restricted zone is x from 170 to 320
     // This is OPPOSITE of player->bounds which shows where they CAN place
 
-    int restricted_min_x = 170;
     int restricted_max_x = SCREEN_HEIGHT; // 320
+    int half_y = SCREEN_WIDTH / 2;  // 120 - middle of screen
 
-    // Check for destroyed towers to extend the restricted zone
+    // Check for destroyed towers to extend the placement zone
     bool top_tower_down = (enemy_towers[0].health <= 0);
     bool bottom_tower_down = (enemy_towers[1].health <= 0);
 
+    // Calculate separate restricted boundaries for top and bottom halves
+    int top_restricted_min_x = 170;
+    int bottom_restricted_min_x = 170;
+
     if (top_tower_down && bottom_tower_down) {
-        // Both towers down - restricted zone shrinks to 220-320
-        restricted_min_x = 220;
-    } else if (top_tower_down || bottom_tower_down) {
-        // One tower down - restricted zone shrinks to 210-320 (split)
-        restricted_min_x = 210;
+        // Both down - can place even deeper, single unified boundary
+        top_restricted_min_x = 220;
+        bottom_restricted_min_x = 220;
+    } else if (top_tower_down) {
+        top_restricted_min_x = 210;  // Can place deeper in top half only
+    } else if (bottom_tower_down) {
+        bottom_restricted_min_x = 210;  // Can place deeper in bottom half only
     }
 
-    // Draw left boundary line (the river edge)
-    gfx_FillRectangle(restricted_min_x, 0, BOUNDARY_WIDTH, SCREEN_WIDTH);
+    // Draw bounds for TOP half (y: 0 to half_y)
+    // Left boundary
+    gfx_FillRectangle(top_restricted_min_x, 0, BOUNDARY_WIDTH, half_y);
+    // Right boundary
+    gfx_FillRectangle(restricted_max_x - BOUNDARY_WIDTH, 0, BOUNDARY_WIDTH, half_y);
+    // Top boundary
+    gfx_FillRectangle(top_restricted_min_x, 0, restricted_max_x - top_restricted_min_x, BOUNDARY_WIDTH);
 
-    // Draw right boundary line (back edge)
-    gfx_FillRectangle(restricted_max_x - BOUNDARY_WIDTH, 0, BOUNDARY_WIDTH, SCREEN_WIDTH);
+    // Draw bounds for BOTTOM half (y: half_y to SCREEN_WIDTH)
+    // Left boundary
+    gfx_FillRectangle(bottom_restricted_min_x, half_y, BOUNDARY_WIDTH, SCREEN_WIDTH - half_y);
+    // Right boundary
+    gfx_FillRectangle(restricted_max_x - BOUNDARY_WIDTH, half_y, BOUNDARY_WIDTH, SCREEN_WIDTH - half_y);
+    // Bottom boundary
+    gfx_FillRectangle(bottom_restricted_min_x, SCREEN_WIDTH - BOUNDARY_WIDTH, restricted_max_x - bottom_restricted_min_x, BOUNDARY_WIDTH);
 
-    // Draw top boundary line
-    gfx_FillRectangle(restricted_min_x, 0, restricted_max_x - restricted_min_x, BOUNDARY_WIDTH);
-
-    // Draw bottom boundary line
-    gfx_FillRectangle(restricted_min_x, SCREEN_WIDTH - BOUNDARY_WIDTH, restricted_max_x - restricted_min_x, BOUNDARY_WIDTH);
-
-    // Draw middle split line when only one tower is down
+    // Draw SHORT connecting line at middle ONLY when one tower is destroyed
+    // This connects the two different boundary x-values at y=120
     if (top_tower_down ^ bottom_tower_down) {
-        int line_y = SCREEN_WIDTH / 2 - BOUNDARY_WIDTH / 2; // Middle of the screen (y=120)
-        gfx_FillRectangle(restricted_min_x, line_y, restricted_max_x - restricted_min_x, BOUNDARY_WIDTH);
+        // One tower down - draw short horizontal line connecting x=170 to x=210
+        int min_x = (top_restricted_min_x < bottom_restricted_min_x) ? top_restricted_min_x : bottom_restricted_min_x;
+        int max_x = (top_restricted_min_x > bottom_restricted_min_x) ? top_restricted_min_x : bottom_restricted_min_x;
+        gfx_FillRectangle(min_x, half_y - BOUNDARY_WIDTH / 2, max_x - min_x + BOUNDARY_WIDTH, BOUNDARY_WIDTH);
     }
+    // No middle line when both towers alive OR both towers dead
 }
 
 // Constrain cursor to valid placement area
@@ -393,10 +407,10 @@ void draw_cursor(player_t *player) {
         card_t *card = get_card_by_index(player, selected);
         cursor_t cursor = card->cursor;
 
-        gfx_PrintStringXY("Cursor X: ", 10, 10);
-        gfx_PrintInt(player->cursor.x, 1);
-        gfx_PrintStringXY("Cursor Y: ", 10, 20);
-        gfx_PrintInt(player->cursor.y, 1);
+        // gfx_PrintStringXY("Cursor X: ", 10, 10);
+        // gfx_PrintInt(player->cursor.x, 1);
+        // gfx_PrintStringXY("Cursor Y: ", 10, 20);
+        // gfx_PrintInt(player->cursor.y, 1);
 
         // Draw cursor: sprite sheet > cursor sprite > circle fallback
         if (card->sprite_def != NULL) {
@@ -421,10 +435,10 @@ void draw_cursor_with_bounds(player_t *player, tower_t *enemy_towers) {
         // Draw placement bounds for selected card
         draw_placement_bounds(player, card, enemy_towers);
 
-        gfx_PrintStringXY("Cursor X: ", 10, 10);
-        gfx_PrintInt(player->cursor.x, 1);
-        gfx_PrintStringXY("Cursor Y: ", 10, 20);
-        gfx_PrintInt(player->cursor.y, 1);
+        // gfx_PrintStringXY("Cursor X: ", 10, 10);
+        // gfx_PrintInt(player->cursor.x, 1);
+        // gfx_PrintStringXY("Cursor Y: ", 10, 20);
+        // gfx_PrintInt(player->cursor.y, 1);
 
         // Draw cursor: sprite sheet > cursor sprite > circle fallback
         if (card->sprite_def != NULL) {
@@ -521,7 +535,7 @@ void update_elixir(game_t *game) {
 
     // Double elixir in last 60 seconds
     bool double_elixir = (game->time_remaining <= 60);
-    double elixir_increment = double_elixir ? 0.1 : 0.05;
+    double elixir_increment = double_elixir ? 0.2 : 0.1;
 
     // Update player elixir every tick
     if (player->elixir < MAX_ELIXIR) {
@@ -663,11 +677,14 @@ void place_card(player_t *player, card_t *card, cursor_t cursor, void **list) {
         spell->duration = card->duration;
         spell->ticks = card->attack_ticks;
         spell->damage = card->damage;
+        spell->time_elapsed = 0;
+        spell->cast_by_opponent = player->opponent;  // Track who cast the spell
+        set_timer(&spell->time_placed);  // Record when spell was cast for true time tracking
 
         // Add to the front of the list
         spell->next = *list;
         spell->prev = NULL;
-        
+
         if (*list != NULL) {
             ((spell_t *)*list)->prev = spell;
         }
@@ -692,6 +709,8 @@ void place_card(player_t *player, card_t *card, cursor_t cursor, void **list) {
         building->time_elapsed = 0;
         building->damage = card->damage;
         building->target = card->target;
+        set_timer(&building->time_placed);  // Record when building was placed for true time tracking
+        building->last_elixir_second = 0;   // Track last second we generated elixir
 
         // Add to the front of the list
         building->next = *list;
@@ -736,7 +755,7 @@ void handle_keys(player_t *player) {
     }
 
     // Cursor movement with acceleration
-    int cursor_speed = 3;  // Base speed
+    int cursor_speed = 5;  // Base speed
     bool key_pressed = false;
     uint8_t current_key = 0;
 
@@ -747,7 +766,7 @@ void handle_keys(player_t *player) {
         else hold_ticks = 0;
 
         int speed = cursor_speed + (hold_ticks / 3);  // Accelerate every 3 ticks
-        if (speed > 15) speed = 15;  // Max speed
+        if (speed > 20) speed = 20;  // Max speed
         player->cursor.y -= speed;
     } else if (kb_Data[7] & kb_Down) {
         current_key = kb_Down;
@@ -756,7 +775,7 @@ void handle_keys(player_t *player) {
         else hold_ticks = 0;
 
         int speed = cursor_speed + (hold_ticks / 3);
-        if (speed > 15) speed = 15;
+        if (speed > 20) speed = 20;
         player->cursor.y += speed;
     }
 
@@ -767,7 +786,7 @@ void handle_keys(player_t *player) {
         else hold_ticks = 0;
 
         int speed = cursor_speed + (hold_ticks / 3);
-        if (speed > 15) speed = 15;
+        if (speed > 20) speed = 20;
         player->cursor.x += speed;
     } else if (kb_Data[7] & kb_Left) {
         current_key = kb_Left;
@@ -776,7 +795,7 @@ void handle_keys(player_t *player) {
         else hold_ticks = 0;
 
         int speed = cursor_speed + (hold_ticks / 3);
-        if (speed > 15) speed = 15;
+        if (speed > 20) speed = 20;
         player->cursor.x -= speed;
     }
 
@@ -915,6 +934,18 @@ void update_projectiles(game_t *game) {
             // Check if out of bounds
             if (is_out_of_bounds(current->position)) {
                 remove_projectile = true;
+            }
+
+            // Check if projectile has exceeded max range from origin
+            if (!remove_projectile && current->max_range > 0) {
+                double dx = current->position.x - current->origin.x;
+                double dy = current->position.y - current->origin.y;
+                double dist_sq = dx * dx + dy * dy;
+                double max_range_sq = current->max_range * current->max_range;
+
+                if (dist_sq > max_range_sq) {
+                    remove_projectile = true;
+                }
             }
 
             if (remove_projectile) {
@@ -1082,6 +1113,7 @@ void draw_troops(game_t *game) {
 }
 
 void draw_spells(game_t *game) {
+    // Draw player's spells in their original color (blue-ish)
     spell_t *spells = game->player->spells;
     spell_t *current_spell = spells;
 
@@ -1091,11 +1123,12 @@ void draw_spells(game_t *game) {
         current_spell = (spell_t *) current_spell->next;
     }
 
+    // Draw opponent's spells in RED to distinguish them
     spells = game->opponent->spells;
     current_spell = spells;
 
     while (current_spell != NULL) {
-        gfx_SetColor(current_spell->color);
+        gfx_SetColor(224);  // Red color for opponent spells
         gfx_Circle(current_spell->position.x, current_spell->position.y, current_spell->radius * TILE_SIZE);
         current_spell = (spell_t *) current_spell->next;
     }
@@ -1245,6 +1278,23 @@ bool troop_in_troop_range(troop_t *attacker, troop_t *target) {
 bool troop_in_tower_range(troop_t *troop, tower_t *tower, int tower_size, bool is_opponent_troop) {
     (void)is_opponent_troop;  // No longer needed with distance-based check
 
+    // Calculate tower center
+    int tower_center_x = tower->position.x + (tower_size / 2);
+    int tower_center_y = tower->position.y + (tower_size / 2);
+
+    // Calculate distance from troop to tower center
+    int dx = troop->position.x - tower_center_x;
+    int dy = troop->position.y - tower_center_y;
+    int dist_sq = dx * dx + dy * dy;
+
+    // AIR troops (balloon) must be nearly on top of tower center to attack
+    // They drop bombs from directly above, so need to be very close
+    if (troop->movement == AIR_MOVEMENT) {
+        int air_attack_range = 15;  // Must be within 15 pixels of tower center
+        return dist_sq <= (air_attack_range * air_attack_range);
+    }
+
+    // GROUND troops use hitbox + attack reach
     int hitbox_radius, attack_reach;
 
     if (troop->sprite_def != NULL) {
@@ -1258,16 +1308,7 @@ bool troop_in_tower_range(troop_t *troop, tower_t *tower, int tower_size, bool i
 
     // Total reach = body radius + attack extension
     int total_reach = hitbox_radius + attack_reach;
-
-    // Calculate tower center
-    int tower_center_x = tower->position.x + (tower_size / 2);
-    int tower_center_y = tower->position.y + (tower_size / 2);
     int tower_radius = tower_size / 2;
-
-    // Calculate distance from troop to tower center
-    int dx = troop->position.x - tower_center_x;
-    int dy = troop->position.y - tower_center_y;
-    int dist_sq = dx * dx + dy * dy;
 
     // In range if distance <= tower radius + troop reach
     int range = tower_radius + total_reach;
@@ -1348,72 +1389,107 @@ void update_troops(game_t *game) {
                 }
             }
 
+            // STICKY ATTACK: If troop has started attacking (attack_ticks > 0),
+            // stay in attack mode until attack completes to prevent flickering
+            if (!in_attack_range && current_troop->attack_ticks > 0) {
+                // Troop was attacking but moved out of range - keep attacking
+                // Re-acquire the previous target if still valid
+                tower_t *nearest_tower = (tower_t *)current_troop->nearest_tower;
+                if (nearest_tower != NULL && nearest_tower->active && nearest_tower->health > 0) {
+                    target = nearest_tower;
+                    target_type = TOWER;
+                    in_attack_range = true;
+                }
+            }
+
             if (in_attack_range) {
-                // Attack animation timing:
-                // - Frame 0 (wind-up): Waiting to attack, charging up
-                // - Frame 1 (strike): Contact/damage frame
-                // Strike duration is 20% of attack cycle
-                #define STRIKE_DURATION_PERCENT 20
-                unsigned int strike_duration = (current_troop->attack_speed * STRIKE_DURATION_PERCENT) / 100;
-                if (strike_duration < 1) strike_duration = 1;
+                // Attack animation timing with 3 states:
+                // - attack_ticks = 0: Neutral (not in attack cycle)
+                // - attack_frame = 0: Wind-up (attack step 1)
+                // - attack_frame = 1: Strike (attack step 2) - damage dealt here
+                //
+                // Flow: Neutral -> Wind-up -> Strike -> back to Neutral
+                //
+                // Wind-up is VERY SHORT (5% of attack_speed), strike is short (10%)
+                // Total attack cycle = wind-up + strike
+                // Time between attacks = attack_speed (cooldown)
+
+                #define WIND_UP_PERCENT 5
+                #define STRIKE_PERCENT 10
+                unsigned int wind_up_duration = (current_troop->attack_speed * WIND_UP_PERCENT) / 100;
+                unsigned int strike_duration = (current_troop->attack_speed * STRIKE_PERCENT) / 100;
+                if (wind_up_duration < 2) wind_up_duration = 2;  // Minimum wind-up (very fast)
+                if (strike_duration < 2) strike_duration = 2;    // Minimum strike
 
                 current_troop->attack_ticks++;
 
-                // Check if we've reached the attack moment (end of wind-up)
-                if (current_troop->attack_ticks == current_troop->attack_speed) {
-                    // Enter strike frame and deal damage
-                    current_troop->attack_frame = 1;
+                // Determine current attack phase
+                if (current_troop->attack_ticks <= wind_up_duration) {
+                    // Wind-up phase (attack step 1)
+                    current_troop->attack_frame = 0;
+                } else if (current_troop->attack_ticks <= wind_up_duration + strike_duration) {
+                    // Strike phase (attack step 2)
+                    // Deal damage when ENTERING strike phase (first tick of strike)
+                    if (current_troop->attack_ticks == wind_up_duration + 1) {
+                        current_troop->attack_frame = 1;
 
-                    if (current_troop->attack_type == MELEE) {
-                        apply_damage(target, target_type, current_troop->damage);
-                    } else if (current_troop->attack_type == RANGED) {
-                        projectile_t *new_projectile = CR_MALLOC(sizeof(projectile_t));
+                        // Apply damage multiplier for realistic damage (400+ per hit)
+                        int actual_damage = current_troop->damage;
+                        if (actual_damage < 400) actual_damage = 400;  // Minimum 400 damage per attack
 
-                        *new_projectile = (projectile_t) {
-                            .sprite = current_troop->projectile_sprite,
-                            .position = current_troop->position,
-                            .target_type = target_type,
-                            .damage = current_troop->damage,
-                            .speed = current_troop->projectile_speed,
-                            .target = target,
-                            .next = NULL,
-                            .prev = NULL
-                        };
+                        if (current_troop->attack_type == MELEE) {
+                            apply_damage(target, target_type, actual_damage);
+                        } else if (current_troop->attack_type == RANGED) {
+                            projectile_t *new_projectile = CR_MALLOC(sizeof(projectile_t));
 
-                        // Calculate angle toward target center
-                        position_t target_pos;
-                        if (target_type == TROOP) {
-                            target_pos = ((troop_t*)target)->position;
-                        } else {
-                            tower_t *t = (tower_t*)target;
-                            int t_idx = t - opponent->towers;
-                            int t_size = (t_idx == 2) ? 60 : 50;
-                            target_pos.x = t->position.x + (t_size / 2);
-                            target_pos.y = t->position.y + (t_size / 2);
-                        }
-                        double dx = target_pos.x - current_troop->position.x;
-                        double dy = target_pos.y - current_troop->position.y;
-                        double angle_deg = atan2(dy, dx) * 180.0 / M_PI;
-                        if (angle_deg < 0) angle_deg += 360.0;
-                        new_projectile->angle = (unsigned int)angle_deg;
+                            *new_projectile = (projectile_t) {
+                                .sprite = current_troop->projectile_sprite,
+                                .position = current_troop->position,
+                                .origin = current_troop->position,
+                                .max_range = current_troop->range * TILE_SIZE + 50.0,
+                                .target_type = target_type,
+                                .damage = actual_damage,  // Use boosted damage
+                                .speed = current_troop->projectile_speed,
+                                .target = target,
+                                .next = NULL,
+                                .prev = NULL
+                            };
 
-                        if (players[i]->projectiles == NULL) {
-                            players[i]->projectiles = new_projectile;
-                        } else {
-                            new_projectile->next = players[i]->projectiles;
-                            players[i]->projectiles->prev = new_projectile;
-                            players[i]->projectiles = new_projectile;
+                            // Calculate angle toward target center
+                            position_t target_pos;
+                            if (target_type == TROOP) {
+                                target_pos = ((troop_t*)target)->position;
+                            } else {
+                                tower_t *t = (tower_t*)target;
+                                int t_idx = t - opponent->towers;
+                                int t_size = (t_idx == 2) ? 60 : 50;
+                                target_pos.x = t->position.x + (t_size / 2);
+                                target_pos.y = t->position.y + (t_size / 2);
+                            }
+                            double dx = target_pos.x - current_troop->position.x;
+                            double dy = target_pos.y - current_troop->position.y;
+                            double angle_deg = atan2(dy, dx) * 180.0 / M_PI;
+                            if (angle_deg < 0) angle_deg += 360.0;
+                            new_projectile->angle = (unsigned int)angle_deg;
+
+                            if (players[i]->projectiles == NULL) {
+                                players[i]->projectiles = new_projectile;
+                            } else {
+                                new_projectile->next = players[i]->projectiles;
+                                players[i]->projectiles->prev = new_projectile;
+                                players[i]->projectiles = new_projectile;
+                            }
                         }
                     }
-                } else if (current_troop->attack_ticks > current_troop->attack_speed + strike_duration) {
-                    // Strike duration over, reset to wind-up
+                    // Stay in strike frame
+                    current_troop->attack_frame = 1;
+                } else if (current_troop->attack_ticks >= current_troop->attack_speed) {
+                    // Cooldown complete, reset for next attack cycle
                     current_troop->attack_ticks = 0;
-                    current_troop->attack_frame = 0;
-                } else if (current_troop->attack_ticks < current_troop->attack_speed) {
-                    // Still in wind-up phase
-                    current_troop->attack_frame = 0;
+                    current_troop->attack_frame = 0;  // Back to neutral/wind-up start
                 }
-                // else: still in strike phase, keep frame 1
+                // else: in cooldown between attacks, stay in neutral visually
+                // (attack_ticks > wind_up + strike but < attack_speed)
 
                 // Only update sprite pointer for old system
                 if (current_troop->sprite_def == NULL) {
@@ -1442,7 +1518,8 @@ void update_troops(game_t *game) {
                     }
                 } else {
                     // Ground troops - movement synced to animation frames
-                    current_troop->movement_ticks++;
+                    // Move 2x faster by halving the effective update rate
+                    current_troop->movement_ticks += 2;  // Increment by 2 for 2x speed
                     if (current_troop->movement_ticks >= current_troop->movement_update_rate) {
                         current_troop->movement_ticks = 0;
 
@@ -1453,9 +1530,10 @@ void update_troops(game_t *game) {
                                 current_troop->sprite_def->movement_sequence_len;
 
                             // Only move if this frame has weight (foot planting)
+                            // Double the movement steps for 2x speed
                             uint8_t weight = current_troop->sprite_def->movement_weights[current_troop->movement_frame];
                             if (weight > 0) {
-                                for (uint8_t w = 0; w < weight; w++) {
+                                for (uint8_t w = 0; w < weight * 2; w++) {  // 2x movement per frame
                                     move_troop_with_pathfinding(current_troop, players[i], opponent);
                                 }
                             }
@@ -1465,13 +1543,14 @@ void update_troops(game_t *game) {
                             current_troop->sprite = is_opponent[i] ?
                                 current_troop->backward_movement[current_troop->movement_frame] :
                                 current_troop->forward_movement[current_troop->movement_frame];
+                            // Move twice for 2x speed
+                            move_troop_with_pathfinding(current_troop, players[i], opponent);
                             move_troop_with_pathfinding(current_troop, players[i], opponent);
                         }
                     }
                 }
 
-                // Reset attack ticks when switching to movement mode
-                current_troop->attack_ticks = 0;
+                // No decay - sticky attack mode handles this now
             }
 
             prev_troop = current_troop;
@@ -1483,22 +1562,28 @@ void update_troops(game_t *game) {
 
 void update_buildings(game_t *game) {
     player_t *players[] = {game->player, game->opponent};
-    bool is_opponent[] = {false, true};
-
-    const int DECAY = 14;  // ~70 second lifetime for 1000 HP building
 
     for (int i = 0; i < 2; i++) {
         building_t *current_building = players[i]->buildings;
         building_t *prev_building = NULL;
 
         while (current_building != NULL) {
-            current_building->attack_ticks++;
-            // Decay health once per second (every 60 ticks)
-            if (current_building->attack_ticks % 60 == 0) {
-                current_building->health -= DECAY;
+            // Get true elapsed time since building was placed (in seconds)
+            unsigned int elapsed_seconds = get_elapsed_time(&current_building->time_placed);
+
+            // Calculate health decay based on true time
+            // Building should lose health proportionally over its duration
+            // health_remaining = MAX_HEALTH * (1 - elapsed/duration)
+            if (current_building->duration > 0) {
+                int health_from_time = current_building->MAX_HEALTH -
+                    (current_building->MAX_HEALTH * elapsed_seconds) / current_building->duration;
+                if (health_from_time < current_building->health) {
+                    current_building->health = health_from_time;
+                }
             }
 
-            if (current_building->health <= 0) {
+            // Check if building has expired (duration reached) or health depleted
+            if (elapsed_seconds >= current_building->duration || current_building->health <= 0) {
                 // Remove the building from the list
                 if (prev_building == NULL) {
                     players[i]->buildings = current_building->next;
@@ -1511,16 +1596,25 @@ void update_buildings(game_t *game) {
                 continue;
             }
 
-            if (current_building->attack_ticks % current_building->attack_speed == 0) {
-                // Ensure that this is initialized
-                players[i]->elixir += current_building->elixir_generated;
-                // Cap elixir at maximum (10)
-                if (players[i]->elixir > 10.0) {
-                    players[i]->elixir = 10.0;
-                }
+            // Generate elixir based on true time (every attack_speed seconds)
+            if (current_building->elixir_generated > 0 && current_building->attack_speed > 0) {
+                // Calculate how many times we should have generated elixir by now
+                unsigned int elixir_intervals = elapsed_seconds / current_building->attack_speed;
 
-                // Leave the option for attacking
-            } 
+                // Generate elixir for any intervals we haven't processed yet
+                if (elixir_intervals > current_building->last_elixir_second) {
+                    unsigned int new_elixir = (elixir_intervals - current_building->last_elixir_second)
+                                              * current_building->elixir_generated;
+                    players[i]->elixir += new_elixir;
+
+                    // Cap elixir at maximum (10)
+                    if (players[i]->elixir > 10.0) {
+                        players[i]->elixir = 10.0;
+                    }
+
+                    current_building->last_elixir_second = elixir_intervals;
+                }
+            }
 
             prev_building = current_building;
             current_building = current_building->next;
@@ -1528,46 +1622,77 @@ void update_buildings(game_t *game) {
     }
 }
 
+// Forward declaration for spell damage function
+void apply_spell_damage_to_enemy(spell_t *spell, player_t *enemy);
+
 void update_spells(game_t *game) {
     player_t *players[] = {game->player, game->opponent};
-    bool is_opponent[] = {false, true};
+    // Enemy is the OPPOSITE player - spells damage the other side
+    player_t *enemies[] = {game->opponent, game->player};
 
     for (int i = 0; i < 2; i++) {
         spell_t *current_spell = players[i]->spells;
         spell_t *prev_spell = NULL;
+        player_t *enemy = enemies[i];  // Spells from players[i] damage enemies[i]
 
         while (current_spell != NULL) {
-            // Replace this with the game time
+            // Get true elapsed time since spell was cast (in seconds)
+            unsigned int elapsed_seconds = get_elapsed_time(&current_spell->time_placed);
+
+            // Apply spell damage/effects
+            // For instant spells (duration <= 1), only apply on first frame
+            // For DoT spells, apply every frame while active
+            if (current_spell->duration <= 1) {
+                // Instant spell: apply damage only once (when time_elapsed == 0)
+                if (current_spell->time_elapsed == 0) {
+                    apply_spell_damage_to_enemy(current_spell, enemy);
+                }
+            } else {
+                // DoT spell: apply damage every frame
+                apply_spell_damage_to_enemy(current_spell, enemy);
+            }
+
+            // Update time_elapsed for tick tracking
             current_spell->time_elapsed++;
 
             // Check if the spell duration has expired
-            if (current_spell->time_elapsed >= current_spell->duration) {
-                // Remove the expired spell
+            bool expired = false;
+            if (current_spell->duration <= 1) {
+                // Instant spell (Zap) - disappear after just 5 ticks (almost instant)
+                expired = (current_spell->time_elapsed >= 5);
+            } else {
+                // DoT spell (Poison) - use duration * 30 ticks
+                // duration=8 means ~240 ticks = ~4 seconds at 60fps
+                unsigned int duration_ticks = current_spell->duration * 30;
+                if (duration_ticks < 120) duration_ticks = 120;  // Minimum 2 seconds
+                if (duration_ticks > 480) duration_ticks = 480;  // Maximum 8 seconds
+                expired = (current_spell->time_elapsed >= duration_ticks);
+            }
+
+            if (expired) {
+                // Remove the expired spell from doubly-linked list
+                spell_t *next_spell = (spell_t *)current_spell->next;
+
+                // Update previous node's next pointer
                 if (prev_spell == NULL) {
-                    players[i]->spells = current_spell->next;
+                    players[i]->spells = next_spell;
                 } else {
-                    prev_spell->next = current_spell->next;
+                    prev_spell->next = next_spell;
                 }
-                spell_t *temp = current_spell;
-                current_spell = current_spell->next;
-                CR_FREE(temp);
+
+                // Update next node's prev pointer (for doubly-linked list)
+                if (next_spell != NULL) {
+                    next_spell->prev = prev_spell;
+                }
+
+                // Free and move to next
+                CR_FREE(current_spell);
+                current_spell = next_spell;
                 continue;
             }
 
-            // Apply spell effects (damage, slow, etc.)
-            // Change this such that time_elapsed is based on the game time and not ticks
-            if (current_spell->time_elapsed % current_spell->ticks == 0) {
-                // get troops, towers, buildings in the radius
-                // and apply damage to them
-                // in the future, have a struct member for function that handles specialty events
-
-                // Apply spell damage or effect
-                // You might want to implement a function to find targets within the spell's radius
-                // and apply the effect to them
-            }
-
             prev_spell = current_spell;
-            current_spell = current_spell->next;
+            current_spell = (spell_t *)current_spell->next;
         }
     }
 }
@@ -1605,6 +1730,8 @@ void update_towers(game_t *game) {
                 opponent->crowns = 3;
             } else {
                 opponent->crowns++;
+                // Activate king tower when a princess tower is destroyed
+                player_towers[2].active = true;
             }
         }
         if (opponent_towers[i].health <= 0 && opponent_towers[i].active) {
@@ -1615,6 +1742,8 @@ void update_towers(game_t *game) {
                 player->crowns = 3;
             } else {
                 player->crowns++;
+                // Activate king tower when a princess tower is destroyed
+                opponent_towers[2].active = true;
             }
         }
     }
@@ -1646,7 +1775,13 @@ void update_towers(game_t *game) {
                     g_tower_target_found++;
                 }
 
-                if (target != NULL && in_range(current_tower->position, current_tower->range, target->position)) {
+                // Calculate tower center for range check (not top-left corner)
+                int tower_size = (j == 2) ? 60 : 50;  // King=60, Princess=50
+                position_t tower_center;
+                tower_center.x = current_tower->position.x + (tower_size / 2);
+                tower_center.y = current_tower->position.y + (tower_size / 2);
+
+                if (target != NULL && in_range(tower_center, current_tower->range, target->position)) {
                     g_tower_in_range++;
                     current_tower->attack_ticks++;
 
@@ -1940,19 +2075,19 @@ void run_game(game_t *game) {
         int p_count = 0, o_count = 0;
         for (projectile_t *p = player->projectiles; p != NULL; p = p->next) p_count++;
         for (projectile_t *p = opponent->projectiles; p != NULL; p = p->next) o_count++;
-        gfx_PrintStringXY("PProj:", 10, 30);
-        gfx_PrintInt(p_count, 1);
-        gfx_PrintStringXY("OProj:", 10, 40);
-        gfx_PrintInt(o_count, 1);
+        // gfx_PrintStringXY("PProj:", 10, 30);
+        // gfx_PrintInt(p_count, 1);
+        // gfx_PrintStringXY("OProj:", 10, 40);
+        // gfx_PrintInt(o_count, 1);
 
         // DEBUG: Tower targeting info
         extern int g_tower_target_found, g_tower_in_range, g_tower_attack_ready;
-        gfx_PrintStringXY("TgtF:", 10, 50);
-        gfx_PrintInt(g_tower_target_found, 1);
-        gfx_PrintStringXY("InRng:", 10, 60);
-        gfx_PrintInt(g_tower_in_range, 1);
-        gfx_PrintStringXY("Atk:", 10, 70);
-        gfx_PrintInt(g_tower_attack_ready, 1);
+        // gfx_PrintStringXY("TgtF:", 10, 50);
+        // gfx_PrintInt(g_tower_target_found, 1);
+        // gfx_PrintStringXY("InRng:", 10, 60);
+        // gfx_PrintInt(g_tower_in_range, 1);
+        // gfx_PrintStringXY("Atk:", 10, 70);
+        // gfx_PrintInt(g_tower_attack_ready, 1);
         // COMMENTED OUT: Opponent view
         // else {
         //     draw_player_modal(opponent, player->towers);

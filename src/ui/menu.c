@@ -1213,7 +1213,7 @@ void calculate_natural_movement(card_t *card) {
     double speed = card->movement_speed > 0 ? card->movement_speed : 1.0;
 
     // Faster troops complete strides in fewer ticks
-    unsigned int ticks_per_stride = (unsigned int)(BASE_STRIDE_TICKS / speed);
+    unsigned int ticks_per_stride = (unsigned int)(BASE_STRIDE_TICKS / speed / 5);
     if (ticks_per_stride < 4) ticks_per_stride = 4;  // Minimum for smooth animation
 
     // Calculate animation rate (ticks per frame change)
@@ -1366,12 +1366,12 @@ void init_deck(data_t *data) {
 
     // Initialize troops - sprite sheet troops use NULL for old arrays
     // Miner, Musketeer, Giant, Knight use new sprite sheet system (sprite_def)
-    // Movement speed: 1.0 = medium, >1.0 = fast, <1.0 = slow
-    init_troop(&available_cards[0], NULL, NULL, NULL, NULL, 2, 2, 6);  // Miner (fast)
-    init_troop(&available_cards[1], NULL, NULL, NULL, NULL, 4, 2, 6);  // Musketeer (medium)
-    init_troop(&available_cards[2], balloon_movement, balloon_movement_rev, balloon_attack, balloon_attack_rev, 1, 1, 1);  // Balloon (slow)
-    init_troop(&available_cards[3], NULL, NULL, NULL, NULL, 4, 2, 5);  // Giant (slow)
-    init_troop(&available_cards[7], NULL, NULL, NULL, NULL, 4, 2, 5);  // Knight (medium)
+    // Movement speed: 1.0 = medium (like Knight), >1.0 = fast, <1.0 = slow
+    init_troop(&available_cards[0], NULL, NULL, NULL, NULL, 2, 2, 1.5);  // Miner (fast)
+    init_troop(&available_cards[1], NULL, NULL, NULL, NULL, 4, 2, 1.0);  // Musketeer (medium)
+    init_troop(&available_cards[2], balloon_movement, balloon_movement_rev, balloon_attack, balloon_attack_rev, 1, 1, 2.0);  // Balloon (faster air)
+    init_troop(&available_cards[3], NULL, NULL, NULL, NULL, 4, 2, 0.7);  // Giant (slow)
+    init_troop(&available_cards[7], NULL, NULL, NULL, NULL, 4, 2, 1.0);  // Knight (medium)
 
     // Calculate natural movement parameters based on sprite size and speed
     // Must be called after sprite_def is assigned
@@ -1381,24 +1381,25 @@ void init_deck(data_t *data) {
     calculate_natural_movement(&available_cards[3]);  // Giant
     calculate_natural_movement(&available_cards[7]);  // Knight
 
-    // Attack type, speed, damage, range (tiles)
-    set_attack_vars(&available_cards[0], MELEE, 20, 1, 1);      // Miner
-    set_attack_vars(&available_cards[1], RANGED, 10, 1, 5);     // Musketeer
-    set_attack_vars(&available_cards[2], MELEE, 10, 1, 0.5);   // Balloon
-    set_attack_vars(&available_cards[3], MELEE, 25, 1, 1);     // Giant
-    set_attack_vars(&available_cards[7], MELEE, 10, 1, 0.5);    // Knight
+    // Attack type, speed (ticks at ~60 FPS), damage, range (tiles)
+    // 60 ticks = ~1 second - using FAST attacks for testing
+    set_attack_vars(&available_cards[0], MELEE, 12, 160, 1);    // Miner: 0.2s, 160 dmg
+    set_attack_vars(&available_cards[1], RANGED, 12, 181, 6);   // Musketeer: 0.2s, 181 dmg, 6 range
+    set_attack_vars(&available_cards[2], MELEE, 30, 600, 0.5);  // Balloon: 0.5s, 600 dmg (death bomb)
+    set_attack_vars(&available_cards[3], MELEE, 15, 211, 1);    // Giant: 0.25s, 211 dmg
+    set_attack_vars(&available_cards[7], MELEE, 12, 167, 1);    // Knight: 0.2s, 167 dmg
 
     // set_attack_speed;
     // set_damage()
 
-    double radius = 2;
-    unsigned int duration = 10;
-    unsigned int color = 150;
+    // Spell parameters: radius (tiles), duration (ticks), color, total damage, tick interval
+    // Zap: Instant damage, small radius
+    // radius=2.5 tiles, duration=1 tick (instant), yellow color (231), 192 damage, tick=1
+    init_spell(&available_cards[4], 2.5, 1, 231, 192, 1);
 
-    // damage at the end
-    // need tick speed to distribute ticks
-    init_spell(&available_cards[4], 0.5, duration, color, 50, 1);
-    init_spell(&available_cards[5], 10, duration, color, 100, 4);
+    // Poison: DoT over time, large radius
+    // radius=3.5 tiles, duration=480 ticks (~8 seconds), purple (202), 600 total damage, tick every 60 ticks
+    init_spell(&available_cards[5], 3.5, 480, 202, 600, 60);
 
 
     unsigned int speed = 5;
