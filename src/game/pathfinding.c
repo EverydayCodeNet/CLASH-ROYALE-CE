@@ -4,10 +4,10 @@
 #include "pathfinding.h"
 #include "memory_simple.h"
 
-// Static bridge data
+// Static bridge data - Y uses walk position (top of bridge sprite)
 static bridge_t bridges[2] = {
-    {{180, BRIDGE_1_Y}, BRIDGE_WIDTH, BRIDGE_HEIGHT},
-    {{180, BRIDGE_2_Y}, BRIDGE_WIDTH, BRIDGE_HEIGHT}
+    {{BRIDGE_CENTER_X, BRIDGE_1_WALK_Y}, BRIDGE_WIDTH, BRIDGE_HEIGHT},
+    {{BRIDGE_CENTER_X, BRIDGE_2_WALK_Y}, BRIDGE_WIDTH, BRIDGE_HEIGHT}
 };
 
 // ============================================================================
@@ -15,18 +15,197 @@ static bridge_t bridges[2] = {
 // ============================================================================
 
 bool is_on_bridge(position_t pos) {
-    // Simplified: check if X is near river (180) and Y is at bridge heights
-    if (pos.x < 165 || pos.x > 195) return false;  // Not near river
+    // Check if X is in river crossing zone
+    if (pos.x < RIVER_X_MIN || pos.x > RIVER_X_MAX) return false;
 
-    // Check if at either bridge Y position (with tolerance)
-    return ((pos.y >= BRIDGE_1_Y - 12 && pos.y <= BRIDGE_1_Y + 12) ||
-            (pos.y >= BRIDGE_2_Y - 12 && pos.y <= BRIDGE_2_Y + 12));
+    // Check if Y is at either bridge walk position (using defined tolerance)
+    return ((pos.y >= BRIDGE_1_WALK_Y - BRIDGE_Y_TOLERANCE && pos.y <= BRIDGE_1_WALK_Y + BRIDGE_Y_TOLERANCE) ||
+            (pos.y >= BRIDGE_2_WALK_Y - BRIDGE_Y_TOLERANCE && pos.y <= BRIDGE_2_WALK_Y + BRIDGE_Y_TOLERANCE));
+}
+
+// ============================================================================
+// OBSTACLE DETECTION
+// ============================================================================
+
+bool is_in_river(position_t pos) {
+    // Check if position is in the river zone but NOT on a bridge
+    if (pos.x < RIVER_X_MIN || pos.x > RIVER_X_MAX) return false;
+
+    // On a bridge? Not blocked
+    if (is_on_bridge(pos)) return false;
+
+    // In river zone but not on bridge = blocked
+    return true;
+}
+
+bool is_blocked_by_tower(position_t pos, player_t *player, player_t *opponent) {
+    const int PRINCESS_TOWER_SIZE = 50;
+    const int KING_TOWER_SIZE = 60;
+
+    // Check both player's and opponent's towers
+    player_t *players[2] = {player, opponent};
+
+    for (int p = 0; p < 2; p++) {
+        if (players[p] == NULL || players[p]->towers == NULL) continue;
+
+        for (int i = 0; i < 3; i++) {
+            tower_t *tower = &players[p]->towers[i];
+            if (!tower->active) continue;
+
+            int tower_size = (i == 2) ? KING_TOWER_SIZE : PRINCESS_TOWER_SIZE;
+            int tower_radius = (i == 2) ? KING_TOWER_RADIUS : PRINCESS_TOWER_RADIUS;
+
+            // Tower center
+            double center_x = tower->position.x + (tower_size / 2);
+            double center_y = tower->position.y + (tower_size / 2);
+
+            // Distance check (squared to avoid sqrt)
+            double dx = pos.x - center_x;
+            double dy = pos.y - center_y;
+            double dist_sq = dx * dx + dy * dy;
+
+            if (dist_sq < tower_radius * tower_radius) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool is_blocked_by_building(position_t pos, player_t *player, player_t *opponent) {
+    // Check both player's and opponent's buildings
+    player_t *players[2] = {player, opponent};
+
+    // Margin to keep troops away from building edges
+    const int MARGIN = 5;
+
+    for (int p = 0; p < 2; p++) {
+        if (players[p] == NULL) continue;
+
+        building_t *building = players[p]->buildings;
+        while (building != NULL) {
+            // Use actual sprite dimensions for collision
+            int sprite_w = building->sprite ? building->sprite->width : 30;
+            int sprite_h = building->sprite ? building->sprite->height : 30;
+
+            // Simple bounding box check with margin
+            int bx = building->position.x - MARGIN;
+            int by = building->position.y - MARGIN;
+            int bw = sprite_w + (MARGIN * 2);
+            int bh = sprite_h + (MARGIN * 2);
+
+            if (pos.x >= bx && pos.x < bx + bw &&
+                pos.y >= by && pos.y < by + bh) {
+                return true;
+            }
+
+            building = building->next;
+        }
+    }
+
+    return false;
+}
+
+bool is_position_blocked(position_t pos, player_t *player, player_t *opponent) {
+    // Check all obstacle types
+    if (is_in_river(pos)) return true;
+    if (is_blocked_by_tower(pos, player, opponent)) return true;
+    if (is_blocked_by_building(pos, player, opponent)) return true;
+
+    return false;
+}
+
+// Check for obstacles excluding river (for use when navigating TO bridge)
+bool is_blocked_by_structure(position_t pos, player_t *player, player_t *opponent) {
+    if (is_blocked_by_tower(pos, player, opponent)) return true;
+    if (is_blocked_by_building(pos, player, opponent)) return true;
+    return false;
+}
+
+// Check if a position or the path to it is blocked
+static bool is_move_blocked(position_t current, position_t desired, player_t *player, player_t *opponent,
+                            bool (*is_blocked)(position_t, player_t*, player_t*)) {
+    // Check destination
+    if (is_blocked(desired, player, opponent)) return true;
+
+    // Check midpoint to catch stepping over obstacles
+    position_t midpoint;
+    midpoint.x = (current.x + desired.x) / 2;
+    midpoint.y = (current.y + desired.y) / 2;
+    if (is_blocked(midpoint, player, opponent)) return true;
+
+    return false;
+}
+
+// Internal steering helper - uses a provided blocking function
+static position_t steer_with_check(position_t current, position_t desired, player_t *player, player_t *opponent,
+                                    bool (*is_blocked)(position_t, player_t*, player_t*)) {
+    // If path to desired position is clear, go there
+    if (!is_move_blocked(current, desired, player, opponent, is_blocked)) {
+        return desired;
+    }
+
+    // Calculate movement vector
+    double dx = desired.x - current.x;
+    double dy = desired.y - current.y;
+    double step = sqrt(dx * dx + dy * dy);
+
+    if (step < 0.1) return current;  // No movement
+
+    // Normalize the movement vector
+    double nx = dx / step;
+    double ny = dy / step;
+
+    // Try perpendicular directions first (better for going around obstacles)
+    position_t alternatives[4];
+
+    // Perpendicular left
+    alternatives[0].x = current.x + step * (-ny);
+    alternatives[0].y = current.y + step * nx;
+
+    // Perpendicular right
+    alternatives[1].x = current.x + step * ny;
+    alternatives[1].y = current.y + step * (-nx);
+
+    // 45 degree turns
+    alternatives[2].x = current.x + step * (nx * 0.707 - ny * 0.707);
+    alternatives[2].y = current.y + step * (nx * 0.707 + ny * 0.707);
+
+    alternatives[3].x = current.x + step * (nx * 0.707 + ny * 0.707);
+    alternatives[3].y = current.y + step * (-nx * 0.707 + ny * 0.707);
+
+    // Find the first unblocked alternative
+    for (int i = 0; i < 4; i++) {
+        if (!is_move_blocked(current, alternatives[i], player, opponent, is_blocked)) {
+            return alternatives[i];
+        }
+    }
+
+    // All alternatives blocked - stay in place
+    return current;
+}
+
+position_t steer_around_obstacle(position_t current, position_t desired, player_t *player, player_t *opponent) {
+    return steer_with_check(current, desired, player, opponent, is_position_blocked);
+}
+
+// Steer around structures only (towers/buildings) - ignores river
+// Use this when navigating TO the bridge
+position_t steer_around_structures(position_t current, position_t desired, player_t *player, player_t *opponent) {
+    return steer_with_check(current, desired, player, opponent, is_blocked_by_structure);
 }
 
 bool needs_to_cross_river(position_t current, position_t target) {
-    // Check if movement would cross the river (X = 180)
-    return (current.x < 180 && target.x > 180) ||
-           (current.x > 180 && target.x < 180);
+    // Check if currently IN the river zone - always need bridge logic
+    bool in_river_zone = (current.x >= RIVER_X_MIN && current.x <= RIVER_X_MAX);
+    if (in_river_zone) return true;
+
+    // Check if path would cross the river (from outside one side to outside other side)
+    bool crossing_left_to_right = (current.x < RIVER_X_MIN && target.x > RIVER_X_MAX);
+    bool crossing_right_to_left = (current.x > RIVER_X_MAX && target.x < RIVER_X_MIN);
+
+    return crossing_left_to_right || crossing_right_to_left;
 }
 
 bridge_t* select_nearest_bridge(position_t current_pos, position_t target_pos) {
@@ -330,32 +509,65 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
         return;
     }
 
-    // GROUND TROOPS: Must use bridges to cross river
+    // GROUND TROOPS: Must use bridges to cross river and avoid obstacles
     if (troop->movement == GROUND_MOVEMENT) {
-        // troop->position IS the anchor point (feet position)
-        // No need to add anchor offset again
         position_t anchor_pos = troop->position;
+        position_t desired_pos;
 
-        // Check if we need to cross the river (using anchor position)
+        // Check if we need to cross the river
         if (needs_to_cross_river(anchor_pos, target_pos)) {
             if (!is_on_bridge(anchor_pos)) {
-                // Not on bridge, need to navigate to one
+                // Not on bridge, navigate to one
                 bridge_t *bridge = select_nearest_bridge(anchor_pos, target_pos);
 
-                // Move toward the bridge center (no Y offset - is_on_bridge checks feet position)
                 double dx = bridge->center.x - troop->position.x;
                 double dy = bridge->center.y - troop->position.y;
                 troop->angle = atan2(dy, dx);
 
-                troop->position.x += troop->step_size * cos(troop->angle);
-                troop->position.y += troop->step_size * sin(troop->angle);
+                // Calculate desired position
+                desired_pos.x = troop->position.x + troop->step_size * cos(troop->angle);
+                desired_pos.y = troop->position.y + troop->step_size * sin(troop->angle);
+
+                // Steer around structures only (not river) when navigating TO bridge
+                position_t steered = steer_around_structures(anchor_pos, desired_pos, my_player, opponent);
+
+                // Update angle based on actual movement direction
+                double actual_dx = steered.x - anchor_pos.x;
+                double actual_dy = steered.y - anchor_pos.y;
+                if (actual_dx != 0 || actual_dy != 0) {
+                    troop->angle = atan2(actual_dy, actual_dx);
+                }
+
+                troop->position = steered;
                 return;
             }
-            // If on bridge, continue normal movement (will cross river)
+            // On bridge - continue to cross
         }
+
+        // Normal ground movement toward target (also applies after crossing bridge)
+        double dx = target_pos.x - anchor_pos.x;
+        double dy = target_pos.y - anchor_pos.y;
+        troop->angle = atan2(dy, dx);
+
+        // Calculate desired position
+        desired_pos.x = anchor_pos.x + troop->step_size * cos(troop->angle);
+        desired_pos.y = anchor_pos.y + troop->step_size * sin(troop->angle);
+
+        // Steer around any obstacles
+        position_t steered = steer_around_obstacle(anchor_pos, desired_pos, my_player, opponent);
+
+        // Update angle based on actual movement direction
+        double actual_dx = steered.x - anchor_pos.x;
+        double actual_dy = steered.y - anchor_pos.y;
+        if (actual_dx != 0 || actual_dy != 0) {
+            troop->angle = atan2(actual_dy, actual_dx);
+        }
+
+        troop->position = steered;
+        return;
     }
 
-    // Normal movement toward target
+    // STATIONARY or fallback: Normal movement without obstacle avoidance
     double dx = target_pos.x - troop->position.x;
     double dy = target_pos.y - troop->position.y;
     troop->angle = atan2(dy, dx);

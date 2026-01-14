@@ -1230,6 +1230,9 @@ void calculate_natural_movement(card_t *card) {
 void init_building(card_t *card, gfx_sprite_t *sprite, double radius, int duration, int elixir_generated) {
     card->duration = duration;
     card->elixir_generated = elixir_generated;
+    card->attack_speed = 540;  // Generate elixir every 9 seconds (540 ticks at 60 FPS)
+    card->damage = 0;
+    card->target = GROUND;
 }
 
 void init_spell(card_t *card, double radius, int duration, int color, int damage, int attack_ticks) {

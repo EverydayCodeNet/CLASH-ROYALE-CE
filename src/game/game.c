@@ -684,11 +684,19 @@ void place_card(player_t *player, card_t *card, cursor_t cursor, void **list) {
         building->sprite = card->cursor.sprite;
         building->position = position;
         building->health = card->health;
+        building->MAX_HEALTH = card->health;
+        building->elixir_generated = card->elixir_generated;
+        building->attack_speed = card->attack_speed;
+        building->attack_ticks = 0;
+        building->duration = card->duration;
+        building->time_elapsed = 0;
+        building->damage = card->damage;
+        building->target = card->target;
 
         // Add to the front of the list
         building->next = *list;
         building->prev = NULL;
-        
+
         if (*list != NULL) {
             ((building_t *)*list)->prev = building;
         }
@@ -1233,8 +1241,10 @@ bool troop_in_troop_range(troop_t *attacker, troop_t *target) {
 }
 
 // Check if troop hitbox + attack reach can hit tower
-// Uses circular hitbox centered on troop position with attack_reach extension
+// Uses circular distance check between troop center and tower center
 bool troop_in_tower_range(troop_t *troop, tower_t *tower, int tower_size, bool is_opponent_troop) {
+    (void)is_opponent_troop;  // No longer needed with distance-based check
+
     int hitbox_radius, attack_reach;
 
     if (troop->sprite_def != NULL) {
@@ -1249,20 +1259,19 @@ bool troop_in_tower_range(troop_t *troop, tower_t *tower, int tower_size, bool i
     // Total reach = body radius + attack extension
     int total_reach = hitbox_radius + attack_reach;
 
-    // Hitbox edge positions
-    int hitbox_left = troop->position.x - total_reach;
-    int hitbox_right = troop->position.x + total_reach;
+    // Calculate tower center
+    int tower_center_x = tower->position.x + (tower_size / 2);
+    int tower_center_y = tower->position.y + (tower_size / 2);
+    int tower_radius = tower_size / 2;
 
-    int tower_left = tower->position.x;
-    int tower_right = tower->position.x + tower_size;
+    // Calculate distance from troop to tower center
+    int dx = troop->position.x - tower_center_x;
+    int dy = troop->position.y - tower_center_y;
+    int dist_sq = dx * dx + dy * dy;
 
-    if (is_opponent_troop) {
-        // Opponent troop walking LEFT -> check if hitbox left edge <= tower right edge
-        return hitbox_left <= tower_right;
-    } else {
-        // Player troop walking RIGHT -> check if hitbox right edge >= tower left edge
-        return hitbox_right >= tower_left;
-    }
+    // In range if distance <= tower radius + troop reach
+    int range = tower_radius + total_reach;
+    return dist_sq <= (range * range);
 }
 
 void update_troops(game_t *game) {
@@ -1476,15 +1485,18 @@ void update_buildings(game_t *game) {
     player_t *players[] = {game->player, game->opponent};
     bool is_opponent[] = {false, true};
 
-    const int DECAY = 5;
+    const int DECAY = 14;  // ~70 second lifetime for 1000 HP building
 
     for (int i = 0; i < 2; i++) {
         building_t *current_building = players[i]->buildings;
         building_t *prev_building = NULL;
 
         while (current_building != NULL) {
-            current_building->health -= DECAY;
             current_building->attack_ticks++;
+            // Decay health once per second (every 60 ticks)
+            if (current_building->attack_ticks % 60 == 0) {
+                current_building->health -= DECAY;
+            }
 
             if (current_building->health <= 0) {
                 // Remove the building from the list
@@ -1502,6 +1514,10 @@ void update_buildings(game_t *game) {
             if (current_building->attack_ticks % current_building->attack_speed == 0) {
                 // Ensure that this is initialized
                 players[i]->elixir += current_building->elixir_generated;
+                // Cap elixir at maximum (10)
+                if (players[i]->elixir > 10.0) {
+                    players[i]->elixir = 10.0;
+                }
 
                 // Leave the option for attacking
             } 

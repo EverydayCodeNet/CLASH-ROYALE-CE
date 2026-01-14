@@ -9,16 +9,49 @@ extern "C" {
 #include "utils.h"
 
 // Bridge and river constants
+// Bridge Y positions match the drawing in map.c (no additional offset)
 #define BRIDGE_1_Y 65
 #define BRIDGE_2_Y 195
 #define BRIDGE_WIDTH 30
 #define BRIDGE_HEIGHT 25
+
+// Bridge walk positions - where troops actually walk (top of bridge sprite)
+#define BRIDGE_1_WALK_Y (BRIDGE_1_Y - (BRIDGE_HEIGHT / 2))
+#define BRIDGE_2_WALK_Y (BRIDGE_2_Y - (BRIDGE_HEIGHT / 2))
+
+// River bounds (actual sprite drawing: riverbank at TILE_SIZE * 18 - 5 = 175)
+#define TILE_SIZE_PF 10
+#define RIVER_X_MIN 175
+#define RIVER_X_MAX 185
+#define RIVER_CENTER_X 180
+
+// Bridge center X for pathfinding: center of river crossing zone
+// (Visual bridge sprite is wider, but troops target river midpoint)
+#define BRIDGE_CENTER_X RIVER_CENTER_X
+
+// Bridge Y tolerance (half height for detection zone)
+#define BRIDGE_Y_TOLERANCE (BRIDGE_HEIGHT / 2)
+
+// Tower/building collision radii (half of actual sprite size)
+#define PRINCESS_TOWER_RADIUS 25   // 50x50 tower / 2
+#define KING_TOWER_RADIUS 30       // 60x60 tower / 2
+#define BUILDING_RADIUS 15         // ~30x30 building / 2
 
 typedef struct {
     position_t center;
     int width;
     int height;
 } bridge_t;
+
+// Obstacle checking (for pathfinding around river, towers, buildings)
+bool is_in_river(position_t pos);
+bool is_blocked_by_tower(position_t pos, player_t *player, player_t *opponent);
+bool is_blocked_by_building(position_t pos, player_t *player, player_t *opponent);
+bool is_position_blocked(position_t pos, player_t *player, player_t *opponent);
+
+// Steering around obstacles
+position_t steer_around_obstacle(position_t current, position_t desired, player_t *player, player_t *opponent);
+position_t steer_around_structures(position_t current, position_t desired, player_t *player, player_t *opponent);
 
 // Bridge detection
 bool is_on_bridge(position_t pos);
