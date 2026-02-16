@@ -111,6 +111,11 @@ position_t get_tower_pushout(position_t pos, player_t *player, player_t *opponen
                     push.x = pos.x + (dx / dist) * push_dist;
                     push.y = pos.y + (dy / dist) * push_dist;
                 }
+                // Clamp to screen bounds (320x240 rotated: x is 0-319, y is 0-239)
+                if (push.x < 0) push.x = 0;
+                if (push.x > 319) push.x = 319;
+                if (push.y < 0) push.y = 0;
+                if (push.y > 239) push.y = 239;
                 return push;
             }
         }
@@ -496,7 +501,7 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
     }
 
     // GROUND TROOPS: Need obstacle avoidance
-    // First, check if troop is stuck inside a tower and push them out
+    // First, check if troop is stuck inside a tower and push them out (check ALL towers)
     position_t pushed = get_tower_pushout(troop->position, my_player, opponent);
     if (pushed.x != troop->position.x || pushed.y != troop->position.y) {
         troop->position = pushed;
@@ -664,8 +669,8 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
                 desired_pos.x = troop->position.x + troop->step_size * cos(troop->angle);
                 desired_pos.y = troop->position.y + troop->step_size * sin(troop->angle);
 
-                // Steer around structures only (not river) when navigating TO bridge
-                position_t steered = steer_around_structures(anchor_pos, desired_pos, my_player, opponent);
+                // Steer around ENEMY structures only (troops walk past own towers freely)
+                position_t steered = steer_around_structures(anchor_pos, desired_pos, NULL, opponent);
 
                 // Update angle based on actual movement direction
                 double actual_dx = steered.x - anchor_pos.x;
@@ -689,8 +694,8 @@ void move_troop_with_pathfinding(troop_t *troop, player_t *my_player, player_t *
         desired_pos.x = anchor_pos.x + troop->step_size * cos(troop->angle);
         desired_pos.y = anchor_pos.y + troop->step_size * sin(troop->angle);
 
-        // Steer around any obstacles
-        position_t steered = steer_around_obstacle(anchor_pos, desired_pos, my_player, opponent);
+        // Steer around ENEMY obstacles only (troops walk past own towers freely)
+        position_t steered = steer_around_obstacle(anchor_pos, desired_pos, NULL, opponent);
 
         // Update angle based on actual movement direction
         double actual_dx = steered.x - anchor_pos.x;

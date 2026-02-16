@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <graphx.h>
 #include <tice.h>
 #include <sys/rtc.h>
@@ -21,7 +22,7 @@
 #include "pathfinding.h"
 #include "sprite_system.h"
 #include "../ui/menu.h"
-#include "/gfx/gfx.h"
+#include "gfx/gfx.h"
 #include "player.h"
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -34,6 +35,14 @@
 #define TILE_SIZE 10
 #define NUM_TOWERS 3
 #define BOUNDARY_WIDTH 4
+#define PRINCESS_TOWER_WIDTH 50
+#define KING_TOWER_WIDTH 60
+
+// Miner can be placed anywhere on the map (like spells) but not on towers
+// Identified by unique combo: TROOP + LEGENDARY + 3 elixir
+static bool is_miner(card_t *card) {
+    return card->type == TROOP && card->rarity == LEGENDARY && card->elixir == 3;
+}
 
 // Export RIVER_X for pathfinding.c
 const int RIVER_X = (TILE_SIZE * 18);
@@ -48,8 +57,8 @@ bool is_out_of_bounds(position_t pos) {
 void draw_placement_bounds(player_t *player, card_t *selected_card, tower_t *enemy_towers) {
     if (selected_card == NULL) return;
 
-    // Only show bounds for troops and buildings, not spells
-    if (selected_card->type == SPELL) return;
+    // Only show bounds for regular troops and buildings, not spells or miner
+    if (selected_card->type == SPELL || is_miner(selected_card)) return;
 
     gfx_SetColor(1); // Red color
 
@@ -105,42 +114,95 @@ void draw_placement_bounds(player_t *player, card_t *selected_card, tower_t *ene
     // No middle line when both towers alive OR both towers dead
 }
 
+// Check if a position overlaps with any living tower's bounding box
+bool is_on_tower(int x, int y, tower_t *towers) {
+    for (int i = 0; i < NUM_TOWERS; i++) {
+        if (towers[i].health <= 0) continue;
+
+        int tw = (i == 2) ? KING_TOWER_WIDTH : PRINCESS_TOWER_WIDTH;
+        int tx = towers[i].position.x;
+        int ty = towers[i].position.y;
+
+        if (x >= tx && x < tx + tw && y >= ty && y < ty + tw) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Get the max x bound for a given y position, accounting for half-screen asymmetry
+int get_max_x_for_y(bounds_t *bounds, int y) {
+    int half_y = SCREEN_WIDTH / 2;  // 120
+    if (y < half_y) {
+        return bounds->points[1].x;  // Top-right x
+    } else {
+        return bounds->points[2].x;  // Bottom-right x
+    }
+}
+
 // Constrain cursor to valid placement area
 void constrain_cursor_to_bounds(player_t *player, card_t *selected_card) {
     if (selected_card == NULL) return;
 
     cursor_t *cursor = &player->cursor;
 
-    if (selected_card->type == SPELL) {
-        // Spells can go anywhere - just constrain to screen
-        cursor->x = MAX(0, MIN(cursor->x, SCREEN_WIDTH - 1));
-        cursor->y = MAX(0, MIN(cursor->y, SCREEN_HEIGHT - 1));
+    // Spells and Miner can go anywhere - just constrain to screen
+    // Note: x is horizontal (0 to SCREEN_HEIGHT-1=319), y is vertical (0 to SCREEN_WIDTH-1=239)
+    if (selected_card->type == SPELL || is_miner(selected_card)) {
+        cursor->x = MAX(0, MIN(cursor->x, SCREEN_HEIGHT - 1));
+        cursor->y = MAX(0, MIN(cursor->y, SCREEN_WIDTH - 1));
         return;
     }
 
     bounds_t *bounds = player->bounds;
 
-    // Constrain to current placement bounds
-    // Cursor is top-left of sprite; boundary marks where left edge of sprite can go
-    cursor->x = MAX(bounds->points[0].x, MIN(cursor->x, bounds->points[1].x));
+    // Constrain y first so we can use it for half-screen x lookup
     cursor->y = MAX(bounds->points[0].y, MIN(cursor->y, bounds->points[3].y));
+
+    // Constrain x based on which half of the screen the cursor is in
+    int max_x = get_max_x_for_y(bounds, cursor->y);
+    cursor->x = MAX(bounds->points[0].x, MIN(cursor->x, max_x));
 }
 
 
-bool is_position_valid(player_t *player, cursor_t cursor, card_t *card) {
-    if (card->type == SPELL) {
-        // Spells can be placed anywhere on the map
-        return (cursor.x >= 0 && cursor.x < SCREEN_WIDTH &&
-                cursor.y >= 0 && cursor.y < SCREEN_HEIGHT);
-    }
-
-    bounds_t *bounds = player->bounds;
+bool is_position_valid(player_t *player, cursor_t cursor, card_t *card, tower_t *own_towers, tower_t *enemy_towers) {
     int x = cursor.x;
     int y = cursor.y;
 
-    // Boundary marks where left edge of sprite can go
-    return (x >= bounds->points[0].x && x <= bounds->points[1].x &&
-            y >= bounds->points[0].y && y <= bounds->points[3].y);
+    // Spells can be placed anywhere on the map
+    // x is horizontal (0 to SCREEN_HEIGHT-1=319), y is vertical (0 to SCREEN_WIDTH-1=239)
+    if (card->type == SPELL) {
+        return (x >= 0 && x < SCREEN_HEIGHT &&
+                y >= 0 && y < SCREEN_WIDTH);
+    }
+
+    // Miner can be placed anywhere on screen, but not on towers
+    if (is_miner(card)) {
+        if (x < 0 || x >= SCREEN_HEIGHT || y < 0 || y >= SCREEN_WIDTH) {
+            return false;
+        }
+        if (is_on_tower(x, y, own_towers) || is_on_tower(x, y, enemy_towers)) {
+            return false;
+        }
+        return true;
+    }
+
+    bounds_t *bounds = player->bounds;
+
+    // Use half-screen aware x bound
+    int max_x = get_max_x_for_y(bounds, y);
+
+    if (x < bounds->points[0].x || x > max_x ||
+        y < bounds->points[0].y || y > bounds->points[3].y) {
+        return false;
+    }
+
+    // Prevent placing on any tower
+    if (is_on_tower(x, y, own_towers) || is_on_tower(x, y, enemy_towers)) {
+        return false;
+    }
+
+    return true;
 }
 
 
@@ -727,7 +789,9 @@ void place_card(player_t *player, card_t *card, cursor_t cursor, void **list) {
     player->elixir -= card->elixir;
 }
 
-void handle_keys(player_t *player) {
+void handle_keys(game_t *game) {
+    player_t *player = game->player;
+    player_t *opponent = game->opponent;
     card_t *card;
     int init_selected = player->deck->selected_card;
     int selected = init_selected;
@@ -817,8 +881,8 @@ void handle_keys(player_t *player) {
 
         if (player->elixir < card->elixir) return;
         
-        // NEW: Check if placement is valid
-        if (!is_position_valid(player, player->cursor, card)) return;
+        // NEW: Check if placement is valid (includes tower collision)
+        if (!is_position_valid(player, player->cursor, card, player->towers, opponent->towers)) return;
         
         if (card->type == TROOP) {
             place_card(player, card, player->cursor, (void **)&player->troops);
@@ -883,6 +947,24 @@ void handle_ai(game_t *game) {
             opponent->cursor.y = randInt(80, 160);
         }
 
+        // Prevent AI from placing on any tower
+        // Check at actual troop position (cursor + anchor offset) since place_card adds anchor
+        if (card->type != SPELL) {
+            int actual_x = opponent->cursor.x;
+            int actual_y = opponent->cursor.y;
+            if (card->sprite_def != NULL) {
+                actual_x += card->sprite_def->anchor_x;
+                actual_y += card->sprite_def->anchor_y;
+            } else {
+                actual_x += card->anchor_x;
+                actual_y += card->anchor_y;
+            }
+            if (is_on_tower(actual_x, actual_y, opponent->towers) ||
+                is_on_tower(actual_x, actual_y, game->player->towers)) {
+                return;
+            }
+        }
+
         // Place the card
         if (card->type == TROOP) {
             place_card(opponent, card, opponent->cursor, (void **)&opponent->troops);
@@ -903,8 +985,8 @@ void handle_players(game_t *game) {
     player_t *opponent = game->opponent;
 
     // For the human player, handle key presses
-    handle_keys(player);
-    
+    handle_keys(game);
+
     // Handle computer logic
     handle_ai(game);
 }
@@ -1648,8 +1730,10 @@ void update_spells(game_t *game) {
                     apply_spell_damage_to_enemy(current_spell, enemy);
                 }
             } else {
-                // DoT spell: apply damage every frame
-                apply_spell_damage_to_enemy(current_spell, enemy);
+                // DoT spell: apply damage at tick intervals (not every frame)
+                if (current_spell->ticks > 0 && current_spell->time_elapsed % current_spell->ticks == 0) {
+                    apply_spell_damage_to_enemy(current_spell, enemy);
+                }
             }
 
             // Update time_elapsed for tick tracking
@@ -1661,12 +1745,9 @@ void update_spells(game_t *game) {
                 // Instant spell (Zap) - disappear after just 5 ticks (almost instant)
                 expired = (current_spell->time_elapsed >= 5);
             } else {
-                // DoT spell (Poison) - use duration * 30 ticks
-                // duration=8 means ~240 ticks = ~4 seconds at 60fps
-                unsigned int duration_ticks = current_spell->duration * 30;
-                if (duration_ticks < 120) duration_ticks = 120;  // Minimum 2 seconds
-                if (duration_ticks > 480) duration_ticks = 480;  // Maximum 8 seconds
-                expired = (current_spell->time_elapsed >= duration_ticks);
+                // DoT spell (Poison) - duration is already in ticks
+                // 480 ticks = 8 seconds at 60fps
+                expired = (current_spell->time_elapsed >= current_spell->duration);
             }
 
             if (expired) {
@@ -2037,7 +2118,7 @@ void run_game(game_t *game) {
             delay(200);
         }
 
-        handle_keys(player);
+        handle_keys(game);
         handle_ai(game);
 
         update_timer(game);

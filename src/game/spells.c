@@ -21,19 +21,16 @@ void apply_spell_damage_to_enemy(spell_t *spell, player_t *enemy) {
         frame_damage = spell->damage;
         if (frame_damage < 400) frame_damage = 400;
     } else {
-        // DoT spell (Poison): HIGH DPS - deal significant damage every tick
-        // Real Clash Royale poison deals ~75 damage per second over 8 seconds
-        // At ~60 ticks per second, that's about 1-2 damage per tick
-        // But we want MUCH more damage to be impactful, so do 50+ per tick
+        // DoT spell (Poison): apply damage at tick intervals
+        // Total damage is spread across number of applications
+        // Applications = duration / ticks (e.g., 480 / 60 = 8 applications)
         unsigned int total = spell->damage;
-        if (total < 600) total = 600;  // Minimum 600 total damage for poison
-
-        // High DPS: deal total/duration damage per TICK (not per second)
-        // This means poison will do its full damage much faster
-        unsigned int dur = spell->duration;
-        if (dur < 1) dur = 1;
-        frame_damage = total / (dur * 10);  // Much higher damage per tick
-        if (frame_damage < 30) frame_damage = 30;  // Minimum 30 damage per tick for visible impact
+        unsigned int num_applications = 1;
+        if (spell->ticks > 0 && spell->duration > 0) {
+            num_applications = spell->duration / spell->ticks;
+        }
+        if (num_applications < 1) num_applications = 1;
+        frame_damage = total / num_applications;  // e.g., 600 / 8 = 75 per application
     }
 
     double spell_radius = spell->radius * TILE_SIZE;

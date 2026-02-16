@@ -1230,7 +1230,7 @@ void calculate_natural_movement(card_t *card) {
 void init_building(card_t *card, gfx_sprite_t *sprite, double radius, int duration, int elixir_generated) {
     card->duration = duration;
     card->elixir_generated = elixir_generated;
-    card->attack_speed = 540;  // Generate elixir every 9 seconds (540 ticks at 60 FPS)
+    card->attack_speed = 9;  // Generate elixir every 9 seconds (used with real-time elapsed seconds)
     card->damage = 0;
     card->target = GROUND;
 }
@@ -1290,9 +1290,9 @@ void init_deck(data_t *data) {
     // card_t *deck = CR_MALLOC(sizeof(card_t) * SIZE_OF_DECK);
 
     init_card(&available_cards[0], miner_card, TROOP, LEGENDARY, GROUND_MOVEMENT, GROUND, true, 3);
-    init_card(&available_cards[1], musketeer_card, TROOP, RARE, GROUND_MOVEMENT, GROUND, true, 4);
+    init_card(&available_cards[1], musketeer_card, TROOP, RARE, GROUND_MOVEMENT, ALL, true, 4);
     init_card(&available_cards[2], balloon_card, TROOP, EPIC, AIR_MOVEMENT, GROUND, false, 5);
-    init_card(&available_cards[3], giant_card, TROOP, LEGENDARY, GROUND_MOVEMENT, GROUND, true, 5);
+    init_card(&available_cards[3], giant_card, TROOP, LEGENDARY, GROUND_MOVEMENT, GROUND, false, 5);
     init_card(&available_cards[4], zap_card, SPELL, LEGENDARY, GROUND_MOVEMENT, GROUND, true, 2);
     init_card(&available_cards[5], poison_card, SPELL, LEGENDARY, STATIONARY, ALL, true, 4);
     init_card(&available_cards[6], elixir_collector_card, BUILDING, RARE, STATIONARY, ALL, false, 6);
@@ -1410,7 +1410,7 @@ void init_deck(data_t *data) {
     // card, sprite, radius, duration, elixir generated
     // init_building(card_t *card, gfx_sprite_t *sprite, double radius, int duration, int elixir_generated) {
 
-    init_building(&available_cards[6], elixir_collector, 0, 10, 1);
+    init_building(&available_cards[6], elixir_collector, 0, 60, 1);
     // init_spell()
     // init_cursor(&available_cards[0])
 
